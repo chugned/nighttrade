@@ -1,0 +1,56 @@
+# Multi-stock watchlist for the Market Safety Observatory.
+#
+# The observer monitors these tickers. Any US ticker is allowed ONLY if it
+# passes every filter below — low-volume, wide-spread, thin-book or
+# halt-bound (extreme-move) stocks are rejected automatically
+# (see `watchlist-check`).
+#
+# This is a paper / simulation watchlist. Monitoring a symbol never places a
+# real order.
+
+# A curated set of liquid US large caps + index ETFs. Monitoring thousands of
+# thinly-traded names would make each cycle slow and is mostly the illiquid
+# long tail these filters exist to reject — so this is the curated liquid set.
+# Add / remove tickers freely.
+symbols:
+  - AAPL
+  - MSFT
+  - NVDA
+  - AMZN
+  - META
+  - GOOGL
+  - TSLA
+  - AVGO
+  - JPM
+  - V
+  - WMT
+  - JNJ
+  - XOM
+  - UNH
+  - PG
+  - MA
+  - HD
+  - COST
+  - ORCL
+  - MRK
+  - ABBV
+  - BAC
+  - KO
+  - PEP
+  - CVX
+  - ADBE
+  - CRM
+  - NFLX
+  - AMD
+  - DIS
+  - INTC
+  - QCOM
+  - TXN
+  - SPY
+  - QQQ
+
+# --- quality filters (a symbol must pass all of them) ---
+min_24h_volume_usd: 20000000        # reject low-volume stocks
+max_spread_bps: 20.0                # reject wide-spread stocks
+min_orderbook_notional_usd: 100000  # reject thin top-of-book size
+pump_dump_max_1h_move_pct: 0.20     # reject extreme intraday spikes

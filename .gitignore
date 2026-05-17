@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+*.so
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Environment
+.env
+.env.local
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
+# Tooling
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+
+# Project runtime artifacts
+artifacts/
+runs/
+*.log
+logs/
+data/cache/
+models/*.pkl
+reports/*.json
+reports/*.md
+reports/observer/
+reports/daily/
+*.db
+*.db-wal
+*.db-shm
+
+# Observatory runtime state
+data/learning_state.json
+data/now.json
+data/cache/
+deploy/_svc-run.sh

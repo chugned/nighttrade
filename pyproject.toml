@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nighttrade"
+version = "0.1.0"
+description = "Multi-layer educational STOCK trading research & paper-trading platform"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "nighttrade" }]
+keywords = ["stocks", "equities", "trading", "research", "paper-trading",
+            "backtesting", "education"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Education",
+    "Programming Language :: Python :: 3.9",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "pydantic>=2.0",
+    "typer>=0.9",
+    "rich>=13.0",
+    "httpx>=0.24",
+    "tenacity>=8.0",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "scikit-learn>=1.3",
+    "eval_type_backport>=0.2; python_version < '3.10'",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "pytest-cov>=4.0"]
+# Optional: live read-only US stock market data. Without it the platform runs
+# fully offline on deterministic mock data.
+online = ["yfinance>=0.2"]
+
+[project.scripts]
+trading-bot = "nighttrade.cli.main:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+nighttrade = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+markers = [
+    "safety: tests that verify real trading is impossible",
+    "leakage: tests that verify no lookahead bias / data leakage",
+    "integration: end-to-end pipeline tests",
+]
+
+[tool.coverage.run]
+source = ["src/nighttrade"]
+branch = true

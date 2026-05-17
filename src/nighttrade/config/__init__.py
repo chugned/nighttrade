@@ -1,0 +1,56 @@
+"""Configuration system — YAML profiles, env overrides, validated schema."""
+
+from __future__ import annotations
+
+from .loader import ConfigError, DEFAULT_CONFIG_DIR, load_config, load_config_dict
+from .schema import (
+    AppConfig,
+    ApprovalConfig,
+    BacktestConfig,
+    ConsensusConfig,
+    ExchangeConfig,
+    FeatureConfig,
+    FusionConfig,
+    FusionWeights,
+    IndicatorConfig,
+    KillSwitchConfig,
+    LabelConfig,
+    MacroConfig,
+    MicrostructureConfig,
+    MLConfig,
+    PaperConfig,
+    RiskConfig,
+    RuntimeConfig,
+    SafetyConfig,
+    SandboxConfig,
+    WalkForwardConfig,
+    WatchlistConfig,
+)
+
+__all__ = [
+    "AppConfig",
+    "ConfigError",
+    "DEFAULT_CONFIG_DIR",
+    "load_config",
+    "load_config_dict",
+    "SafetyConfig",
+    "RuntimeConfig",
+    "ExchangeConfig",
+    "ConsensusConfig",
+    "IndicatorConfig",
+    "MicrostructureConfig",
+    "FeatureConfig",
+    "LabelConfig",
+    "MLConfig",
+    "WalkForwardConfig",
+    "MacroConfig",
+    "FusionConfig",
+    "FusionWeights",
+    "KillSwitchConfig",
+    "RiskConfig",
+    "PaperConfig",
+    "BacktestConfig",
+    "WatchlistConfig",
+    "ApprovalConfig",
+    "SandboxConfig",
+]

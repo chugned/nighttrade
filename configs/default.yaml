@@ -1,0 +1,151 @@
+# nighttrade — default configuration profile.
+#
+# Every value here is also a schema default; this file documents the knobs and
+# is the profile loaded when NIGHTTRADE_PROFILE is unset.
+#
+# SAFETY: the `safety` block is validated to be paper-only. Setting any of its
+# flags to a real-trading value makes config loading FAIL on purpose.
+
+profile: default
+symbol: AAPL
+
+safety:
+  live_trading_enabled: false   # must stay false — enforced by validator
+  allow_real_orders: false      # must stay false — enforced by validator
+  paper_trading: true           # must stay true  — enforced by validator
+
+runtime:
+  log_level: INFO
+  deterministic: true
+  random_seed: 42
+  allow_network: false          # true => allow read-only public market data
+
+exchanges:
+  sources: [yfinance, stooq]    # free, key-less US stock data providers
+  timeout_seconds: 5.0
+  max_retries: 3
+  retry_backoff_seconds: 0.5
+
+consensus:
+  min_sources: 1
+  outlier_z_threshold: 3.0      # MAD-based bad-print rejection
+  max_dispersion: 0.05
+
+indicators:
+  rsi_period: 14
+  ema_fast: 12
+  ema_slow: 26
+  macd_signal: 9
+  volatility_window: 20
+  momentum_window: 10
+  trend_window: 20
+
+microstructure:
+  flow_window: 20               # bars for intraday order-flow imbalance
+  imbalance_strong: 0.30
+  wide_spread_bps: 8.0          # effective-spread proxy above this is "wide"
+  rvol_window: 30               # bars for the relative-volume baseline
+  low_rvol_threshold: 0.40      # RVOL below this = thin participation
+  vwap_window: 60               # bars for the rolling session VWAP
+  vwap_stretch_strong: 0.015    # |price-VWAP|/VWAP beyond this = stretched
+  gap_strong_pct: 0.012         # session gap beyond this is notable
+  swing_window: 30              # bars for swing support / resistance
+
+features:
+  return_windows: [1, 3, 5, 10]
+  rolling_std_window: 20
+  skew_kurtosis_window: 30
+
+labels:
+  horizon: 5
+  breakout_threshold: 0.004
+
+ml:
+  model_kind: gradient_boosting
+  test_size: 0.25
+  min_train_samples: 100
+
+walkforward:
+  n_folds: 5
+  train_window: 400
+  test_window: 100
+  overfit_gap_warn: 0.15
+  suspicious_accuracy: 0.85
+
+macro:
+  source: mock                  # 'mock' (deterministic) or 'gemini'
+  default_risk_level: medium
+
+fusion:
+  weights:
+    technical: 0.35
+    microstructure: 0.25
+    macro: 0.20
+    ml: 0.20
+  action_threshold: 0.15
+  min_confidence: 0.35
+  entry_offset_vol_mult: 1.0       # entry offset, in volatility units
+  stop_vol_mult: 1.0               # stop distance from entry
+  target_vol_mult: 5.0             # target distance from entry
+  min_volatility_fraction: 0.002   # volatility-unit floor (fraction of price)
+  max_volatility_fraction: 0.05    # volatility-unit cap
+
+killswitch:
+  macro_risk_block: extreme
+  micro_max_spread_bps: 12.0
+  block_on_chop: true
+  block_on_thin_liquidity: true
+
+risk:
+  fee_bps: 10.0
+  base_slippage_bps: 2.0
+  impact_slippage_bps: 8.0
+  latency_ms: 250.0
+  risk_per_trade: 0.01
+  max_position_pct: 0.25          # per-stock notional cap (fraction of equity)
+  max_daily_loss_pct: 0.05
+  max_weekly_loss_pct: 0.12       # rolling 7-day loss limit
+  max_open_positions: 3
+  loss_cooldown_bars: 20          # wait after a losing trade
+  partial_fill_liquidity_frac: 0.25
+
+paper:
+  starting_cash: 1000.0          # simulated paper capital (not real money)
+  base_currency: EUR          # the paper account is denominated in euros
+
+backtest:
+  warmup_bars: 50
+  sharpe_warn_threshold: 4.0
+
+watchlist:
+  symbols: [AAPL, MSFT, NVDA]            # add any liquid US tickers here
+  min_24h_volume_usd: 20000000           # reject thin / low-volume stocks
+  max_spread_bps: 20.0                   # reject wide-spread stocks
+  min_orderbook_notional_usd: 100000     # reject thin top-of-book size
+  pump_dump_max_1h_move_pct: 0.20        # reject suspected halt-bound spikes
+
+cross_section:
+  momentum_lookback: 60          # bars for trailing-return momentum
+  trend_window: 60               # bars for the signed-R² trend factor
+  reversion_rsi_period: 14
+  volatility_window: 30
+  weights:
+    momentum: 0.35
+    trend: 0.25
+    reversion: 0.15
+    low_vol: 0.15
+    ml: 0.10
+  long_fraction: 0.10            # top 10% of the ranked universe -> long basket
+  short_fraction: 0.10           # bottom 10% -> short / avoid basket
+  winsorize_limit: 0.05          # clip 5% from each tail before z-scoring
+  min_dollar_volume: 10000000    # exclude stocks thinner than this
+
+approval:
+  require_manual_approval: true          # confirm every trade at the CLI
+  confirmation_phrase: "YES"             # quoted — bare YES is YAML's boolean
+
+sandbox:
+  enabled: false                # opt-in: broker PAPER-account execution only
+  broker: alpaca                # only 'alpaca' (paper trading) is supported
+  require_read_only_keys: true  # require non-order keys by default
+  reject_live_keys: true        # MUST stay true — enforced by validator

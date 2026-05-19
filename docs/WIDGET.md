@@ -6,7 +6,7 @@ dashboard inside an external project-orchestration tool.
 ## What nighttrade is (one paragraph)
 
 nighttrade is an educational stock-market research & paper-trading platform.
-It continuously observes the S&P 500 on live market data, runs a quant
+It continuously observes the US stock market on live data, runs a quant
 analysis pipeline (technical indicators, tape microstructure, macro context,
 an ML model, cross-sectional ranking) and **paper-trades only** — it never
 places a real order. It condenses market conditions into a single **Market

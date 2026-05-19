@@ -63,8 +63,20 @@ def test_db_creates_schema(tmp_path):
     db = _db(tmp_path)
     for table in ("market_snapshots", "predictions", "prediction_outcomes",
                   "paper_trades", "safety_scores", "symbol_health",
-                  "bot_runs", "errors"):
+                  "bot_runs", "errors", "rankings", "gate_events"):
         assert db.count(table) == 0
+    db.close()
+
+
+def test_gate_events_recorded(tmp_path):
+    """Strategy-gate decisions are persisted and counted."""
+    db = _db(tmp_path)
+    db.insert_gate_event(symbol="AAPL", gate="regime", allowed=False,
+                         reason="regime blocked")
+    db.insert_gate_event(symbol="MSFT", gate="regime", allowed=True,
+                         reason="cleared")
+    assert db.gate_block_counts() == {"regime": 1}  # only the blocked one
+    assert len(db.recent_gate_events()) == 2
     db.close()
 
 

@@ -43,6 +43,7 @@ from ..ml import PredictiveModel, build_dataset
 from ..models import Action, ModelKind, Side
 from ..paper import PaperBroker
 from ..pipeline import AnalysisPipeline
+from ..research import ResearchLab
 from ..risk import RiskEngine
 from ..reporting import (
     backtest_report_dict,
@@ -534,8 +535,9 @@ def observe(
     predictions, evaluates older predictions against reality, and scores
     market safety. Observation / paper simulation only — no real orders.
 
-    With ``--live`` the observer monitors the real S&P 500 on live Yahoo
-    Finance intraday data; otherwise it uses the deterministic mock feed.
+    With ``--live`` the observer monitors the S&P 500 — the ~500 most liquid
+    US stocks — on live Yahoo Finance intraday data; otherwise it uses the
+    deterministic mock feed.
     """
     cfg = _setup(profile)
     _console.rule("[bold]nighttrade — Market Safety Observer")
@@ -682,7 +684,7 @@ def watchlist_check() -> None:
 def rank(
     profile: Optional[str] = typer.Option(None, help="Config profile."),
     live: bool = typer.Option(
-        False, "--live", help="Rank the real S&P 500 on live yfinance data."),
+        False, "--live", help="Rank the live S&P 500 (the ~500 most liquid US stocks)."),
     top: int = typer.Option(20, help="How many stocks to show per basket."),
     max_symbols: Optional[int] = typer.Option(
         None, help="Cap the live universe to the first N symbols."),
@@ -773,6 +775,131 @@ def rank(
     _console.print("[dim]Cross-sectional ranking is relative — it says which "
                     "stocks look strong vs the universe, not that the market "
                     "will rise. Paper / research only.[/dim]")
+
+
+@app.command()
+def research(
+    profile: Optional[str] = typer.Option(None, help="Config profile."),
+    years: int = typer.Option(3, help="Years of real daily history to test on."),
+    symbols: Optional[str] = typer.Option(
+        None, help="Comma-separated tickers (default: the watchlist)."),
+    limit: Optional[int] = typer.Option(
+        None, help="Cap the number of symbols tested."),
+    sweep: bool = typer.Option(
+        False, "--sweep", help="Sweep ATR stop/target multipliers (Phase 1) "
+                               "instead of the baseline report."),
+    meta: bool = typer.Option(
+        False, "--meta", help="Evaluate the meta-labelling model (Phase 4) "
+                              "out-of-sample instead of the baseline report."),
+) -> None:
+    """Run the research lab — backtest + purged walk-forward on REAL history.
+
+    The measurement harness from the strategy plan: it downloads years of real
+    daily bars (cached), backtests and walk-forward-validates the strategy, and
+    delivers an honest baseline verdict. 'No edge' is the expected default —
+    every later change must be proven here, out-of-sample, before going live.
+
+    With ``--sweep`` it instead sweeps the ATR stop/target multipliers,
+    optimizes in-sample and validates the winner out-of-sample.
+    """
+    cfg = _setup(profile)
+    _console.rule("[bold]nighttrade — research lab")
+    syms = ([s.strip().upper() for s in symbols.split(",") if s.strip()]
+            if symbols else load_watchlist_config().symbols)
+    if limit:
+        syms = syms[:limit]
+    lab = ResearchLab(cfg)
+
+    if sweep:
+        _console.print(f"Sweeping ATR stop/target multipliers across "
+                        f"[bold]{len(syms)}[/bold] symbols, {years}y history…")
+        rep = lab.sweep_stops(syms, years=years)
+        if not rep.grid or rep.best is None:
+            _console.print("[red]" + (rep.notes[0] if rep.notes
+                                      else "no data") + "[/red]")
+            return
+        grid_table = Table(title="ATR stop/target sweep — in-sample",
+                           header_style="bold")
+        for col in ("Stop xATR", "Reward:Risk", "Return", "Win rate", "Trades"):
+            grid_table.add_column(col)
+        for p in sorted(rep.grid, key=lambda x: -x.return_pct):
+            best = " ← best" if p is rep.best else ""
+            grid_table.add_row(
+                f"{p.stop_mult:.1f}", f"{p.reward_risk:.1f}:1",
+                f"{p.return_pct:+.1f}%", f"{p.win_rate * 100:.0f}%",
+                f"{p.trades}{best}")
+        _console.print(grid_table)
+        b = rep.best
+        _console.print(Panel(
+            f"[bold]Best in-sample:[/bold] stop {b.stop_mult:.1f}xATR, "
+            f"reward:risk {b.reward_risk:.1f}:1  →  {b.return_pct:+.1f}%\n"
+            f"[bold]Out-of-sample:[/bold]  {rep.oos_return:+.1f}%  "
+            f"(current config: {rep.baseline_oos_return:+.1f}%)\n"
+            + "\n".join(f"• {n}" for n in rep.notes),
+            title="Sweep verdict", border_style="cyan"))
+        return
+
+    if meta:
+        _console.print(f"Triple-barrier labelling + meta-model evaluation "
+                        f"across [bold]{len(syms)}[/bold] symbols, {years}y…")
+        rep = lab.evaluate_meta(syms, years=years)
+        table = Table(show_header=False, box=None, padding=(0, 2))
+        table.add_column("k", style="bold")
+        table.add_column("v")
+        table.add_row("Train samples", f"{rep.train_samples:,}")
+        table.add_row("Test samples", f"{rep.test_samples:,}")
+        table.add_row("Base win rate (test)", f"{rep.base_rate * 100:.1f}%")
+        table.add_row("Meta-model accuracy", f"{rep.accuracy * 100:.1f}%")
+        table.add_row("Accepted-trade precision", f"{rep.precision * 100:.1f}%")
+        table.add_row("Coverage (trades accepted)", f"{rep.coverage * 100:.1f}%")
+        table.add_row("Precision lift vs base", f"{rep.lift * 100:+.1f} pts")
+        _console.print(table)
+        style = "cyan" if rep.lift > 0.03 else "yellow"
+        _console.print(Panel("\n".join(f"• {n}" for n in rep.notes),
+                              title="Meta-model verdict", border_style=style))
+        return
+
+    _console.print(f"Backtesting [bold]{len(syms)}[/bold] symbols on {years}y "
+                    f"of real daily history "
+                    f"[dim](first run downloads + caches)…[/dim]")
+    report = lab.run(syms, years=years)
+
+    table = Table(title="Per-symbol baseline", header_style="bold")
+    for col in ("Symbol", "Bars", "Backtest return", "Win rate", "Trades",
+                "WF accuracy", "Overfit gap"):
+        table.add_column(col)
+    for r in report.symbols:
+        bt = r.backtest
+        has_wf = r.walkforward.n_folds > 0
+        table.add_row(
+            r.symbol, str(r.bars), f"{bt.total_return_pct:+.1f}%",
+            f"{bt.win_rate * 100:.0f}%", str(bt.total_trades),
+            f"{r.wf_accuracy * 100:.1f}%" if has_wf else "—",
+            f"{r.walkforward.mean_overfit_gap * 100:+.0f}%" if has_wf else "—")
+    _console.print(table)
+
+    agg = Table(show_header=False, box=None, padding=(0, 2))
+    agg.add_column("k", style="bold")
+    agg.add_column("v")
+    agg.add_row("Mean backtest return", f"{report.mean_return_pct:+.2f}%")
+    agg.add_row("Mean win rate", f"{report.mean_win_rate * 100:.1f}%")
+    agg.add_row("Mean Sharpe-like", f"{report.mean_sharpe:.2f}")
+    agg.add_row("Mean walk-forward accuracy",
+                f"{report.mean_wf_accuracy * 100:.1f}%")
+    agg.add_row("Mean overfit gap", f"{report.mean_overfit_gap * 100:+.1f}%")
+    agg.add_row("Total backtested trades", str(report.total_trades))
+    agg.add_row("Leakage-flagged symbols", str(report.leakage_flags))
+    _console.print(agg)
+
+    style = {"SUSPECTED LEAKAGE": "red", "OVERFIT": "red", "NO DATA": "red",
+             "MARGINAL EDGE — UNPROVEN": "cyan"}.get(report.verdict, "yellow")
+    _console.print(Panel(
+        "\n".join([f"[bold]{report.verdict}[/bold]"]
+                  + [f"• {n}" for n in report.notes]),
+        title="Baseline verdict", border_style=style))
+    if report.skipped:
+        _console.print(f"[dim]Skipped (too little history): "
+                        f"{', '.join(report.skipped)}[/dim]")
 
 
 @app.command("market-hours")

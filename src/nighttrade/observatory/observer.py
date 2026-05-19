@@ -26,6 +26,13 @@ from typing import Dict, List, Optional
 
 from ..config.schema import AppConfig
 from ..cross_section import compute_factors, rank_universe
+from ..gates import (
+    CalibrationGate,
+    ConfidenceCalibrator,
+    MetaGate,
+    MetaModel,
+    RegimeGate,
+)
 from ..market_hours import is_market_open
 from ..models import Action, Side
 from ..pipeline import AnalysisPipeline
@@ -56,6 +63,13 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _LOG_FILE = _REPO_ROOT / "logs" / "nighttrade.log"
 _OBSERVER_REPORTS = _REPO_ROOT / "reports" / "observer"
 _NOW_PATH = _REPO_ROOT / "data" / "now.json"
+
+# Idle-time ML training: when the market is closed the observer retrains the
+# model on real data instead of sitting idle.
+_MODEL_PATH = _REPO_ROOT / "artifacts" / "model.pkl"
+_META_MODEL_PATH = _REPO_ROOT / "artifacts" / "meta_model.pkl"
+_MODEL_RETRAIN_HOURS = 12.0   # retrain only when the model is older than this
+_TRAIN_SYMBOL_SAMPLE = 120    # symbols sampled to build the training set
 
 # The 10 steps of one observation cycle (for the dashboard "Now" panel).
 CYCLE_STEPS = [
@@ -108,6 +122,27 @@ class Observer:
         self.feed = feed or LiveMockFeed()
         self.pipeline = AnalysisPipeline(config, model)
         self.screener = WatchlistScreener(watchlist_config)
+        # Phase 2 — the regime gate. Reward:risk = target/stop volatility mults.
+        reward_risk = (config.fusion.target_vol_mult
+                       / max(config.fusion.stop_vol_mult, 1e-9))
+        self.regime_gate = RegimeGate(reward_risk,
+                                      config.gates.regime_min_samples)
+        # Phase 3 — the confidence-calibration gate. The calibrator is refit
+        # from evaluated history each cycle; the gate reads it live.
+        self.calibrator = ConfidenceCalibrator(
+            config.gates.calibration_min_samples)
+        self.calibration_gate = CalibrationGate(
+            self.calibrator, config.gates.calibration_floor)
+        # Phase 4 — the meta-labelling gate. Loads a saved meta-model if one
+        # exists; (re)trained during market-closed downtime.
+        self.meta_model = MetaModel(config.runtime.random_seed)
+        if _META_MODEL_PATH.exists():
+            try:
+                self.meta_model = MetaModel.load(_META_MODEL_PATH)
+            except Exception:  # noqa: BLE001 - a bad pickle must not block startup
+                pass
+        self.meta_gate = MetaGate(self.meta_model,
+                                  config.gates.meta_min_probability)
         self.alerts = AlertManager(
             db=self.db, allow_network=config.runtime.allow_network)
         # Optional 30-day learning session (set by `nighttrade learn`).
@@ -174,7 +209,9 @@ class Observer:
         self._set_now("Fetching market data", "", now)
         self._activity(f"cycle {self._cycle} started", level="info")
 
-        memory = build_prediction_memory(self.db.outcomes(limit=500))
+        outcomes = self.db.outcomes(limit=500)
+        memory = build_prediction_memory(outcomes)
+        self._fit_calibrator(outcomes)  # Phase 3 — refit on evaluated history
         recent_accuracy = memory.overall_accuracy if memory.total >= 10 else None
         summary.recent_accuracy = recent_accuracy
 
@@ -205,6 +242,11 @@ class Observer:
         # Cross-sectional ranking — rank the whole universe relative to itself.
         self._set_now("Ranking the universe", "", now)
         self._rank_cross_section(now, summary)
+
+        # Market-closed downtime is not wasted — retrain the ML model on the
+        # real data the feed has accumulated.
+        if not self._market_open:
+            self._train_model_idle(now)
 
         # Evaluate matured predictions against reality.
         self._set_now("Updating outcomes", "", now)
@@ -358,9 +400,29 @@ class Observer:
 
         # --- paper-trading simulation step (entry only; exits in _manage) ---
         if self._market_open and prediction_id is not None:
-            self._maybe_open_position(symbol, decision, screening, price,
-                                      liquidity_notional, equity, now,
-                                      prediction_id)
+            # Strategy gates: regime (Phase 2) and confidence calibration
+            # (Phase 3). The first gate to object blocks the entry.
+            checks = (
+                ("regime", self.regime_gate.evaluate(safety.condition, memory)),
+                ("calibration",
+                 self.calibration_gate.evaluate(decision.confidence)),
+                ("meta", self.meta_gate.evaluate(candles, self.config)),
+            )
+            blocked = next(((name, g) for name, g in checks
+                            if not g.allowed), None)
+            if blocked is not None and decision.action is not Action.HOLD:
+                name, gate = blocked
+                self.db.insert_gate_event(symbol=symbol, gate=name,
+                                          allowed=False, reason=gate.reason)
+                self._activity(f"{name} gate blocked {symbol}", gate.reason)
+            else:
+                if decision.action is not Action.HOLD:
+                    self.db.insert_gate_event(
+                        symbol=symbol, gate="all", allowed=True,
+                        reason="cleared regime + calibration + meta gates")
+                self._maybe_open_position(symbol, decision, screening, price,
+                                          liquidity_notional, equity, now,
+                                          prediction_id)
 
         # --- collect this stock's factors for the cross-sectional ranking ---
         ml_score = (result.ml.score if self.pipeline.model is not None
@@ -440,6 +502,102 @@ class Observer:
         self._activity(
             f"ranked {len(ranked.stocks)} stocks cross-sectionally",
             f"long {summary.ranking_longs} / short {summary.ranking_shorts}")
+
+    def _fit_calibrator(self, outcomes: List[Dict]) -> None:
+        """Refit the confidence calibrator from evaluated prediction history.
+
+        Each evaluated prediction contributes a (stated confidence, was-correct)
+        pair; isotonic regression turns those into a calibrated probability map.
+        Cheap enough to redo every cycle.
+        """
+        confidences: List[float] = []
+        correct: List[int] = []
+        for row in outcomes:
+            verdict = row.get("directionally_correct")
+            confidence = row.get("confidence")
+            if verdict is not None and confidence is not None:
+                confidences.append(float(confidence))
+                correct.append(int(verdict))
+        self.calibrator.fit(confidences, correct)
+
+    def _train_model_idle(self, now: datetime) -> None:
+        """Use market-closed downtime to (re)train the ML model on real data.
+
+        Builds a supervised dataset from the feed's accumulated candles across
+        a sample of the universe, fits a fresh model, saves it, and loads it
+        into the live pipeline. Throttled to retrain at most every
+        ``_MODEL_RETRAIN_HOURS``. Any failure is logged, never fatal.
+        """
+        try:
+            age_h = ((time.time() - _MODEL_PATH.stat().st_mtime) / 3600.0
+                     if _MODEL_PATH.exists() else 1e9)
+        except OSError:
+            age_h = 1e9
+        if age_h < _MODEL_RETRAIN_HOURS:
+            return  # the model is still fresh — nothing to do
+
+        self._set_now("Training the ML model (market closed)", "", now)
+        self._activity("market closed — training the ML model on real data",
+                        level="info")
+        try:
+            import pandas as pd
+
+            from ..ml import PredictiveModel, build_dataset
+            from ..ml.dataset import Dataset
+            from ..models.enums import ModelKind
+
+            symbols = list(self.watchlist_config.symbols)[:_TRAIN_SYMBOL_SAMPLE]
+            x_parts: List = []
+            y_parts: List = []
+            candle_series: List = []   # reused for the meta-model below
+            names: Optional[List[str]] = None
+            for symbol in symbols:
+                try:
+                    candles = self.feed.candles_at(symbol, now, n_bars=400)
+                    if len(candles) < 80:
+                        continue
+                    candle_series.append(candles)
+                    ds = build_dataset(candles, self.config)
+                    if len(ds) < 30:
+                        continue
+                    x_parts.append(ds.X)
+                    y_parts.append(ds.y)
+                    names = ds.feature_names
+                except Exception:  # noqa: BLE001 - skip a bad symbol
+                    continue
+            if len(x_parts) < 5 or names is None:
+                _log.warning("idle training skipped — not enough usable data")
+                return
+
+            dataset = Dataset(
+                X=pd.concat(x_parts, ignore_index=True),
+                y=pd.concat(y_parts, ignore_index=True),
+                feature_names=names)
+            model = PredictiveModel(ModelKind(self.config.ml.model_kind),
+                                    self.config.runtime.random_seed)
+            result = model.fit(dataset)
+            _MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            model.save(_MODEL_PATH)
+            self.pipeline.model = model  # the live pipeline picks it up at once
+            _log.info("idle training: %d samples, in-sample accuracy %.3f -> %s",
+                      result.samples, result.accuracy, model.version)
+            self._activity(
+                f"ML model retrained on {result.samples:,} real samples",
+                f"in-sample accuracy {result.accuracy:.0%} "
+                f"({len(x_parts)} stocks)", level="info")
+
+            # Phase 4 — also retrain the meta-model on triple-barrier labels.
+            self._set_now("Training the meta-model (market closed)", "", now)
+            self.meta_model.fit_from_candles(candle_series, self.config)
+            if self.meta_model.is_trained:
+                self.meta_model.save(_META_MODEL_PATH)
+                _log.info("idle training: meta-model %s", self.meta_model.version)
+                self._activity(
+                    "meta-model retrained",
+                    f"{self.meta_model.samples:,} triple-barrier samples",
+                    level="info")
+        except Exception as exc:  # noqa: BLE001 - training must never crash a cycle
+            _log.warning("idle model training failed: %s", exc)
 
     # -- learning session ----------------------------------------------------
 

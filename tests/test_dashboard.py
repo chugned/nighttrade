@@ -173,6 +173,33 @@ def test_dashboard_status_now_panel(tmp_path):
     assert "cycle" in body
 
 
+def test_dashboard_gates_endpoint(tmp_path):
+    """The /api/gates endpoint surfaces the four strategy gates."""
+    client = TestClient(create_app(tmp_path / "obs.db"))
+    body = client.get("/api/gates").json()
+    assert {g["key"] for g in body["gates"]} == {
+        "time_stop", "regime", "calibration", "meta"}
+    assert body["total_blocked"] == 0          # empty db — nothing blocked yet
+    assert body["events"] == []
+    assert "meta_min_probability" in body["thresholds"]
+
+
+def test_dashboard_gates_records_decisions(tmp_path):
+    """Recorded gate decisions show up in the endpoint, allowed and blocked."""
+    db_path = tmp_path / "gates.db"
+    db = ObservatoryDB(db_path)
+    db.insert_gate_event(symbol="AAPL", gate="all", allowed=True,
+                         reason="cleared regime + calibration + meta gates")
+    db.insert_gate_event(symbol="MSFT", gate="regime", allowed=False,
+                         reason="regime blocked")
+    db.close()
+    body = TestClient(create_app(db_path)).get("/api/gates").json()
+    assert body["total_blocked"] == 1
+    assert body["blocked_by_gate"]["regime"] == 1
+    assert body["recent_allowed"] == 1
+    assert len(body["events"]) == 2
+
+
 def test_dashboard_health_denies_wallets_and_transfers(tmp_path):
     client = TestClient(create_app(tmp_path / "obs.db"))
     body = client.get("/api/health").json()

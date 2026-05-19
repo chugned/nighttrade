@@ -95,6 +95,7 @@
     <button data-tab="ranking"     class="tab px-3.5 py-1.5 rounded-lg">Ranking</button>
     <button data-tab="regimes"     class="tab px-3.5 py-1.5 rounded-lg">Regimes</button>
     <button data-tab="calibration" class="tab px-3.5 py-1.5 rounded-lg">Calibration</button>
+    <button data-tab="gates"       class="tab px-3.5 py-1.5 rounded-lg">Strategy Gates</button>
     <button data-tab="accuracy"    class="tab px-3.5 py-1.5 rounded-lg">Accuracy</button>
     <button data-tab="paper"       class="tab px-3.5 py-1.5 rounded-lg">Paper Trading</button>
     <button data-tab="investments" class="tab px-3.5 py-1.5 rounded-lg">Investments</button>
@@ -227,6 +228,20 @@
     <div class="card p-4">
       <div class="text-sm font-semibold mb-1" style="color:var(--yellow)">⚠ Notice</div>
       <div id="calibWarnings" class="text-xs" style="color:var(--dim)"></div></div>
+  </section>
+
+  <section id="tab-gates" class="tab-panel hidden">
+    <div class="card p-4 mb-4">
+      <div class="lbl mb-1">Strategy gates — the four research-backed filters from Phases 1–4, wired into the live decision path</div>
+      <div id="gatesSummary" class="text-xs" style="color:var(--dim)">No gate activity yet.</div>
+    </div>
+    <div id="gateCards" class="grid md:grid-cols-2 lg:grid-cols-4 gap-3 mb-4"></div>
+    <div class="card p-3 overflow-x-auto">
+      <div class="lbl mb-2">Recent gate decisions — newest first</div>
+      <table><thead><tr><th>Time (local)</th><th>Symbol</th><th>Gate</th><th>Decision</th><th>Reason</th></tr></thead>
+      <tbody id="gateRows"></tbody></table>
+    </div>
+    <div class="text-xs mt-3" style="color:var(--dim)">Gates only ever remove trades — they never invent one. A gate with zero blocks is still gathering evidence, not idle. Paper / research only.</div>
   </section>
 
   <section id="tab-accuracy" class="tab-panel hidden">
@@ -632,6 +647,37 @@ async function renderInvestments(){
       '<td class="mono" style="color:'+c+'">'+((t.pnl||0)>=0?'+':'')+fmt(t.pnl,2)+'</td></tr>';
   }).join('')||'<tr><td colspan="5" style="color:var(--dim)">No closed simulated investments yet.</td></tr>';
 }
+async function renderGates(){
+  const g=await api('/api/gates'); if(!g||g.error) return;
+  const th=g.thresholds||{}, bg=g.blocked_by_gate||{};
+  const recentBlocked=(g.recent_total||0)-(g.recent_allowed||0);
+  document.getElementById('gatesSummary').innerHTML=
+    '<b style="color:var(--down)">'+(g.total_blocked||0)+'</b> entries blocked all-time · '+
+    'last '+(g.recent_total||0)+' decisions: <b style="color:var(--up)">'+(g.recent_allowed||0)+
+    '</b> allowed, <b style="color:var(--down)">'+recentBlocked+'</b> blocked';
+  const thLabel={
+    time_stop:'closes after the time barrier',
+    regime:'needs ≥'+(th.regime_min_samples??'—')+' samples to activate',
+    calibration:'floor '+pct((th.calibration_floor??0)*100)+' · ≥'+(th.calibration_min_samples??'—')+' samples',
+    meta:'P(target before stop) ≥ '+pct((th.meta_min_probability??0)*100)};
+  document.getElementById('gateCards').innerHTML=(g.gates||[]).map(x=>{
+    const n=bg[x.key]||0;
+    return '<div class="card p-4" style="background:var(--panel2)">'+
+      '<div class="flex justify-between items-baseline"><span class="font-bold">'+x.name+'</span>'+
+      '<span class="lbl">Phase '+x.phase+'</span></div>'+
+      '<div class="text-3xl font-black mono mt-1" style="color:'+(n>0?'var(--down)':'var(--up)')+'">'+n+
+      '<span class="text-xs font-normal" style="color:var(--dim)"> blocked</span></div>'+
+      '<div class="text-[11px] mt-1" style="color:var(--faint)">'+(thLabel[x.key]||x.kind)+'</div>'+
+      '<div class="text-xs mt-2" style="color:var(--dim)">'+x.desc+'</div></div>';
+  }).join('');
+  document.getElementById('gateRows').innerHTML=(g.events||[]).map(e=>{
+    const ok=!!e.allowed, c=ok?'var(--up)':'var(--down)';
+    return '<tr><td class="mono" style="color:var(--faint)">'+ltime(e.ts)+'</td>'+
+      '<td class="font-semibold">'+(e.symbol||'—')+'</td><td>'+(e.gate||'')+'</td>'+
+      '<td style="color:'+c+'">'+(ok?'allowed':'BLOCKED')+'</td>'+
+      '<td style="color:var(--dim)">'+(e.reason||'')+'</td></tr>';
+  }).join('')||'<tr><td colspan="5" style="color:var(--dim)">No gate decisions recorded yet — the observer records one per checked entry.</td></tr>';
+}
 async function renderRisk(){
   const r=await api('/api/risk'); if(!r||r.error) return;
   const list=(a,e)=>a&&a.length?a.map(x=>'<div class="py-0.5">• '+x+'</div>').join(''):
@@ -665,8 +711,8 @@ function showTab(name){
 document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
 function refreshTab(){
   ({overview:renderOverview,progress:renderProgress,symbols:renderSymbols,ranking:renderRanking,
-    regimes:renderRegimes,calibration:renderCalibration,accuracy:renderAccuracy,paper:renderPaper,
-    investments:renderInvestments,risk:renderRisk}[activeTab]||(()=>{}))();
+    regimes:renderRegimes,calibration:renderCalibration,gates:renderGates,accuracy:renderAccuracy,
+    paper:renderPaper,investments:renderInvestments,risk:renderRisk}[activeTab]||(()=>{}))();
 }
 
 // --- night / light theme toggle ---

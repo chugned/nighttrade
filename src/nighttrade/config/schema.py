@@ -254,6 +254,32 @@ class KillSwitchConfig(_Section):
     block_on_thin_liquidity: bool = True
 
 
+class GatesConfig(_Section):
+    """Strategy decision gates — regime / calibration / meta-model.
+
+    Each gate filters live entries on the strategy's own measured evidence.
+    A gate with too little evidence stays inactive (passes trades through)
+    so it gathers data before it judges — self-correcting by design.
+    """
+
+    regime_min_samples: int = Field(
+        default=20, ge=1,
+        description="Evaluated predictions a regime needs before the regime "
+                    "gate will block it.")
+    calibration_min_samples: int = Field(
+        default=40, ge=1,
+        description="Evaluated predictions needed before the isotonic "
+                    "confidence calibration is fitted and enforced.")
+    calibration_floor: float = Field(
+        default=0.50, ge=0.0, le=1.0,
+        description="Minimum calibrated win probability for a live entry.")
+    meta_min_probability: float = Field(
+        default=0.20, ge=0.0, le=1.0,
+        description="Minimum meta-model P(target before stop) for a live "
+                    "entry. Must sit ABOVE the triple-barrier base rate (which "
+                    "the 5:1 geometry puts near ~12%), not at a naive 50%+.")
+
+
 class RiskConfig(_Section):
     fee_bps: float = Field(default=10.0, ge=0, description="Per-side fee, bps.")
     base_slippage_bps: float = Field(default=2.0, ge=0)
@@ -284,6 +310,12 @@ class RiskConfig(_Section):
         default=20, ge=0,
         description="Bars to wait after a losing trade before a new entry.",
     )
+    time_stop_bars: int = Field(
+        default=20, ge=0,
+        description="Triple-barrier time stop: force-close a position after "
+                    "this many bars even if neither stop nor target is hit. "
+                    "0 disables it.",
+    )
     partial_fill_liquidity_frac: float = Field(
         default=0.25, gt=0, le=1.0,
         description="Max fraction of top-of-book liquidity one order may consume.",
@@ -297,7 +329,7 @@ class RiskConfig(_Section):
 
 
 class PaperConfig(_Section):
-    starting_cash: float = Field(default=1_000.0, gt=0)
+    starting_cash: float = Field(default=10_000.0, gt=0)
     base_currency: str = "EUR"
 
 
@@ -475,6 +507,7 @@ class AppConfig(_Section):
     macro: MacroConfig = Field(default_factory=MacroConfig)
     fusion: FusionConfig = Field(default_factory=FusionConfig)
     killswitch: KillSwitchConfig = Field(default_factory=KillSwitchConfig)
+    gates: GatesConfig = Field(default_factory=GatesConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     paper: PaperConfig = Field(default_factory=PaperConfig)
     backtest: BacktestConfig = Field(default_factory=BacktestConfig)

@@ -130,6 +130,10 @@ def create_app(db_path: Path | str = DEFAULT_DB_PATH) -> FastAPI:
     def daily_reports() -> Any:
         return _safe(lambda d: d.daily_reports())
 
+    @app.get("/api/gates")
+    def gates() -> Any:
+        return _safe(lambda d: d.gates())
+
     @app.get("/api/symbols/{symbol}")
     def symbol_detail_plural(symbol: str) -> Any:
         return _safe(lambda d: d.symbol_detail(symbol))

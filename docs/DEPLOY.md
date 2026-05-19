@@ -28,7 +28,7 @@ and need no open terminal:
 
 | Service | What it does |
 |---|---|
-| `com.nighttrade.observer`  | the 24/7 live S&P 500 observer (`observe --live`) |
+| `com.nighttrade.observer`  | the 24/7 live US-market observer (`observe --live`) |
 | `com.nighttrade.dashboard` | the dashboard on `127.0.0.1:8001` |
 
 The observer runs under `caffeinate -s`, so the Mac will not system-sleep

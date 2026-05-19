@@ -126,7 +126,9 @@ class Backtester:
             # --- manage an open position: stop / target checks first ---
             if open_trade is not None:
                 bars_in_position += 1
-                exit_price = self._exit_price(bar, open_trade)
+                exit_price = self._exit_price(
+                    bar, open_trade, i - open_trade.bar_opened,
+                    self.config.risk.time_stop_bars)
                 if exit_price is not None:
                     liq = self._liquidity(bar.close)
                     broker.submit_market_order(
@@ -207,8 +209,15 @@ class Backtester:
     # -- internals -----------------------------------------------------------
 
     @staticmethod
-    def _exit_price(bar: OHLCV, trade: _OpenTrade) -> Optional[float]:
+    def _exit_price(bar: OHLCV, trade: _OpenTrade, held_bars: int,
+                    time_stop_bars: int) -> Optional[float]:
         """Decide whether the bar triggers an exit, and at what price.
+
+        Three barriers (de Prado's triple-barrier):
+          * **stop** — ``bar.low`` touches the stop.
+          * **target** — ``bar.high`` touches the target.
+          * **time** — the position has been open ``time_stop_bars`` bars; it
+            is force-closed at the bar close even if neither level is hit.
 
         If both stop and target are touched within the same bar, the *stop*
         is assumed to fill first — the conservative, pessimistic choice.
@@ -217,6 +226,8 @@ class Backtester:
             return trade.stop
         if bar.high >= trade.target:
             return trade.target
+        if 0 < time_stop_bars <= held_bars:
+            return bar.close
         return None
 
     @staticmethod

@@ -96,6 +96,12 @@ killswitch:
   block_on_chop: true
   block_on_thin_liquidity: true
 
+gates:
+  regime_min_samples: 20         # evaluated predictions before the regime gate bites
+  calibration_min_samples: 40    # evaluated predictions before calibration is enforced
+  calibration_floor: 0.50        # min calibrated win probability for a live entry
+  meta_min_probability: 0.20     # min meta-model P(target before stop) — above the ~12% base rate
+
 risk:
   fee_bps: 10.0
   base_slippage_bps: 2.0
@@ -107,11 +113,12 @@ risk:
   max_weekly_loss_pct: 0.12       # rolling 7-day loss limit
   max_open_positions: 3
   loss_cooldown_bars: 20          # wait after a losing trade
+  time_stop_bars: 20              # triple-barrier time stop (0 disables)
   partial_fill_liquidity_frac: 0.25
 
 paper:
-  starting_cash: 1000.0          # simulated paper capital (not real money)
-  base_currency: EUR          # the paper account is denominated in euros
+  starting_cash: 10000.0         # simulated paper capital (not real money)
+  base_currency: EUR             # the paper account is denominated in euros
 
 backtest:
   warmup_bars: 50

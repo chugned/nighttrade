@@ -51,6 +51,33 @@ def test_backtest_fees_and_slippage_nonneg(uptrend_backtest):
     assert m.total_slippage >= 0.0
 
 
+def test_time_stop_is_a_third_barrier():
+    """The triple-barrier time stop force-closes a position after N bars."""
+    from datetime import datetime, timezone
+    from nighttrade.backtest.engine import Backtester, _OpenTrade
+    from nighttrade.models import OHLCV
+
+    trade = _OpenTrade(entry_price=100.0, stop=90.0, target=120.0,
+                       quantity=1.0, bar_opened=0)
+    ts = datetime(2026, 1, 2, tzinfo=timezone.utc)
+    quiet = OHLCV(symbol="AAPL", timestamp=ts, open=101, high=103,
+                  low=99, close=102)  # touches neither stop nor target
+
+    # Not yet at the time barrier — no exit.
+    assert Backtester._exit_price(quiet, trade, held_bars=5,
+                                  time_stop_bars=20) is None
+    # At/after the time barrier — force-close at the bar close.
+    assert Backtester._exit_price(quiet, trade, held_bars=20,
+                                  time_stop_bars=20) == 102
+    # time_stop_bars=0 disables the barrier entirely.
+    assert Backtester._exit_price(quiet, trade, held_bars=999,
+                                  time_stop_bars=0) is None
+    # The stop still takes priority over the time barrier.
+    hit = OHLCV(symbol="AAPL", timestamp=ts, open=95, high=96, low=89, close=92)
+    assert Backtester._exit_price(hit, trade, held_bars=99,
+                                  time_stop_bars=20) == 90.0
+
+
 @pytest.mark.integration
 def test_pipeline_end_to_end(uptrend_candles, config):
     """The full analysis pipeline produces a coherent decision."""

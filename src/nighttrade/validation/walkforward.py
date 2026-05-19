@@ -29,9 +29,9 @@ _log = get_logger("validation.walkforward")
 
 
 def _resolve_windows(n: int, train_window: int, test_window: int,
-                     n_folds: int) -> "tuple[int, int]":
+                     n_folds: int, purge: int) -> "tuple[int, int]":
     """Shrink the configured windows if the dataset cannot accommodate them."""
-    needed = train_window + test_window * n_folds
+    needed = train_window + purge + test_window * n_folds
     if needed <= n:
         return train_window, test_window
     # Scale both windows down proportionally to fit the data we actually have.
@@ -47,8 +47,15 @@ def _resolve_windows(n: int, train_window: int, test_window: int,
 def walk_forward_validate(
     candles: List[OHLCV],
     config: AppConfig,
+    purge: int | None = None,
 ) -> WalkForwardReport:
-    """Run walk-forward validation and return an aggregated report."""
+    """Run *purged* walk-forward validation and return an aggregated report.
+
+    Args:
+        purge: the number of bars dropped between each train and test window
+            so forward-looking labels cannot leak across the split. Defaults
+            to the label horizon (de Prado's purging) — the exact overlap.
+    """
     dataset: Dataset = build_dataset(candles, config)
     X = dataset.X.values
     y = dataset.y.values
@@ -56,8 +63,9 @@ def walk_forward_validate(
     n = len(dataset)
 
     wf = config.walkforward
+    purge = config.labels.horizon if purge is None else max(0, purge)
     train_window, test_window = _resolve_windows(
-        n, wf.train_window, wf.test_window, wf.n_folds
+        n, wf.train_window, wf.test_window, wf.n_folds, purge
     )
 
     folds: List[WalkForwardFold] = []
@@ -65,9 +73,10 @@ def walk_forward_validate(
     start = 0
     fold_id = 0
 
-    while fold_id < wf.n_folds and start + train_window + test_window <= n:
+    while fold_id < wf.n_folds and start + train_window + purge + test_window <= n:
         tr_lo, tr_hi = start, start + train_window
-        te_lo, te_hi = tr_hi, tr_hi + test_window
+        te_lo = tr_hi + purge          # purge gap — no label overlap leaks
+        te_hi = te_lo + test_window
 
         X_tr, y_tr = X[tr_lo:tr_hi], y[tr_lo:tr_hi]
         X_te, y_te = X[te_lo:te_hi], y[te_lo:te_hi]

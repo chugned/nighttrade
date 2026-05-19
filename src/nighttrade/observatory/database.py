@@ -107,6 +107,11 @@ CREATE TABLE IF NOT EXISTS rankings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL, payload TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS gate_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TEXT NOT NULL, symbol TEXT, gate TEXT NOT NULL,
+    allowed INTEGER NOT NULL, reason TEXT
+);
 CREATE INDEX IF NOT EXISTS ix_snap_symbol_ts ON market_snapshots(symbol, ts);
 CREATE INDEX IF NOT EXISTS ix_activity_id ON activity_events(id);
 CREATE INDEX IF NOT EXISTS ix_regime_ts ON regime_periods(ts);
@@ -291,6 +296,25 @@ class ObservatoryDB:
             return json.loads(row["payload"])
         except (ValueError, TypeError):
             return None
+
+    def insert_gate_event(self, symbol: Optional[str], gate: str,
+                          allowed: bool, reason: str,
+                          ts: Optional[str] = None) -> int:
+        """Record a strategy-gate decision (allowed / blocked) for a symbol."""
+        return self._insert("gate_events", {
+            "ts": ts or _now(), "symbol": symbol, "gate": gate,
+            "allowed": int(allowed), "reason": reason})
+
+    def gate_block_counts(self) -> Dict[str, int]:
+        """Number of *blocked* entries per gate."""
+        rows = self._conn.execute(
+            "SELECT gate, COUNT(*) AS c FROM gate_events WHERE allowed=0 "
+            "GROUP BY gate").fetchall()
+        return {r["gate"]: r["c"] for r in rows}
+
+    def recent_gate_events(self, limit: int = 60) -> List[Dict[str, Any]]:
+        return self._all("SELECT * FROM gate_events ORDER BY id DESC LIMIT ?",
+                         (limit,))
 
     def regime_periods(self, limit: int = 2000) -> List[Dict[str, Any]]:
         return list(reversed(self._all(

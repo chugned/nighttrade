@@ -55,7 +55,7 @@ trading-bot simulate      # full end-to-end simulation + report
 trading-bot config        # show the active (validated) configuration
 trading-bot market-hours  # show the current US market session
 trading-bot rank          # cross-sectional ranking of the universe
-trading-bot rank --live   # ...ranked on the real S&P 500
+trading-bot rank --live   # ...ranked on the live S&P 500
 
 # operations layer
 trading-bot watchlist     # screen the multi-stock watchlist for liquidity
@@ -111,7 +111,7 @@ Equity alpha is *relative* — the question is not "will this stock rise?" but
 
 are z-scored *across the whole universe*, blended with configurable weights,
 and ranked. The top fraction becomes the long basket, the bottom the
-short/avoid basket. `--live` ranks the real S&P 500.
+short/avoid basket. `--live` ranks the live S&P 500.
 
 The 24/7 observer also computes the ranking **every cycle** and stores it, so
 the dashboard's **Ranking** tab shows the live long/short baskets updating

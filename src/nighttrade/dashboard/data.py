@@ -410,6 +410,54 @@ class DashboardData:
             if _DAILY_DIR.exists() else []
         return {"metrics": self.db.daily_metrics(), "report_files": files}
 
+    def gates(self, limit: int = 80) -> Dict[str, Any]:
+        """Strategy-gate activity — the four research-backed filters.
+
+        Surfaces Phases 1-4 as they run live: how often each gate blocked an
+        entry, the most recent decisions, and the configured thresholds.
+        """
+        events = self.db.recent_gate_events(limit=limit)
+        blocked = self.db.gate_block_counts()
+        try:
+            cfg = load_config(load_dotenv_file=False).gates
+            thresholds = {
+                "regime_min_samples": cfg.regime_min_samples,
+                "calibration_min_samples": cfg.calibration_min_samples,
+                "calibration_floor": cfg.calibration_floor,
+                "meta_min_probability": cfg.meta_min_probability,
+            }
+        except Exception:  # noqa: BLE001 - dashboard must stay up
+            thresholds = {}
+        recent_allowed = sum(1 for e in events if e.get("allowed"))
+        return {
+            "total_blocked": sum(blocked.values()),
+            "blocked_by_gate": blocked,
+            "recent_allowed": recent_allowed,
+            "recent_total": len(events),
+            "thresholds": thresholds,
+            "events": events,
+            "gates": [
+                {"key": "time_stop", "name": "Time stop", "phase": 1,
+                 "kind": "structural",
+                 "desc": "Force-closes a position after the time barrier "
+                         "even if neither stop nor target is hit."},
+                {"key": "regime", "name": "Regime gate", "phase": 2,
+                 "kind": "adaptive",
+                 "desc": "Blocks new entries in any market regime whose "
+                         "measured accuracy is below its break-even win rate."},
+                {"key": "calibration", "name": "Calibration gate", "phase": 3,
+                 "kind": "adaptive",
+                 "desc": "Admits an entry only when the isotonic-calibrated "
+                         "win probability clears the floor — not raw confidence."},
+                {"key": "meta", "name": "Meta-label gate", "phase": 4,
+                 "kind": "model",
+                 "desc": "A secondary model scores P(target before stop); "
+                         "the low-precision entries are vetoed."},
+            ],
+            "notice": "Gates only ever remove trades — they never invent one. "
+                      "A gate with zero blocks is gathering evidence, not idle.",
+        }
+
     # -- helpers -------------------------------------------------------------
 
     @staticmethod

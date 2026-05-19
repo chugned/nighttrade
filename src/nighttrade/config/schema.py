@@ -329,7 +329,7 @@ class RiskConfig(_Section):
 
 
 class PaperConfig(_Section):
-    starting_cash: float = Field(default=10_000.0, gt=0)
+    starting_cash: float = Field(default=1_000.0, gt=0)
     base_currency: str = "EUR"
 
 

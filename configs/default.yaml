@@ -117,7 +117,7 @@ risk:
   partial_fill_liquidity_frac: 0.25
 
 paper:
-  starting_cash: 10000.0         # simulated paper capital (not real money)
+  starting_cash: 1000.0          # simulated paper capital (not real money)
   base_currency: EUR             # the paper account is denominated in euros
 
 backtest:

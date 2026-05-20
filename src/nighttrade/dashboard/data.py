@@ -213,12 +213,46 @@ class DashboardData:
         wins = [t for t in closed if (t.get("pnl") or 0) > 0]
         best = max(closed, key=lambda t: t.get("pnl") or 0, default=None)
         worst = min(closed, key=lambda t: t.get("pnl") or 0, default=None)
+
+        # Enrich each open position with the latest market price and the
+        # unrealized PnL — what would crystallize if it closed at this tick.
+        prices = {s["symbol"]: s.get("price")
+                  for s in self.db.latest_snapshots()}
+        enriched_open: List[Dict[str, Any]] = []
+        total_invested = 0.0
+        total_unrealized = 0.0
+        for t in open_trades:
+            qty = float(t.get("quantity") or 0.0)
+            entry = float(t.get("entry_price") or 0.0)
+            invested = qty * entry
+            price_now = prices.get(t["symbol"])
+            side = (t.get("side") or "").lower()
+            unrealized: Optional[float] = None
+            unrealized_pct: Optional[float] = None
+            if price_now is not None and qty > 0 and entry > 0:
+                diff = (float(price_now) - entry) * qty
+                unrealized = -diff if side == "sell" else diff
+                unrealized_pct = (unrealized / invested * 100.0
+                                  if invested else None)
+                total_unrealized += unrealized
+            total_invested += invested
+            enriched_open.append({**t,
+                "invested": round(invested, 2),
+                "price_now": price_now,
+                "unrealized_pnl": (round(unrealized, 2)
+                                   if unrealized is not None else None),
+                "unrealized_pnl_pct": (round(unrealized_pct, 2)
+                                       if unrealized_pct is not None else None),
+            })
+
         return {
             "equity": dd["equity"],
             "starting_cash": _STARTING_CASH,
             "total_pnl": round(dd["equity"] - _STARTING_CASH, 2),
             "max_drawdown_pct": dd["max_drawdown_pct"],
-            "open_positions": open_trades,
+            "open_positions": enriched_open,
+            "open_total_invested": round(total_invested, 2),
+            "open_total_unrealized_pnl": round(total_unrealized, 2),
             "closed_trades": closed[:100],
             "closed_count": len(closed),
             "win_rate": round(len(wins) / len(closed) * 100, 1) if closed else 0.0,

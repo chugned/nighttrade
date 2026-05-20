@@ -268,7 +268,16 @@
       <div class="card p-3.5"><div class="lbl">Max drawdown</div><div id="pDd" class="text-xl font-bold mono mt-1"></div></div>
       <div class="card p-3.5"><div class="lbl">Fees / slippage</div><div id="pFees" class="text-xl font-bold mono mt-1"></div></div>
     </div>
-    <div class="card p-4 mb-4"><div class="lbl mb-2">Open simulated positions</div><div id="pOpen" class="text-[13px]"></div></div>
+    <div class="card p-3 mb-4 overflow-x-auto">
+      <div class="flex items-baseline justify-between mb-2 px-1">
+        <span class="lbl">Open simulated positions — live unrealized PnL</span>
+        <span id="pOpenTotals" class="text-xs mono" style="color:var(--dim)"></span>
+      </div>
+      <table><thead><tr>
+        <th>Opened (local)</th><th>Stock</th><th>Side</th><th>Quantity</th>
+        <th>Invested (€)</th><th>Entry price</th><th>Price now</th><th>Unrealized PnL</th>
+      </tr></thead><tbody id="pOpen"></tbody></table>
+    </div>
     <div class="card p-3 overflow-x-auto"><div class="lbl mb-2">Closed simulated trades</div>
       <table><thead><tr><th>Symbol</th><th>Side</th><th>Entry</th><th>Exit</th><th>PnL</th><th>Fees</th></tr></thead>
       <tbody id="pClosed"></tbody></table></div>
@@ -617,10 +626,27 @@ async function renderPaper(){
   document.getElementById('pWin').textContent=pct(p.win_rate);
   document.getElementById('pDd').textContent=pct(p.max_drawdown_pct);
   document.getElementById('pFees').textContent=fmt(p.total_fees,1)+' / '+fmt(p.total_slippage,1);
-  document.getElementById('pOpen').innerHTML=(p.open_positions||[]).map(t=>
-    '<div class="flex justify-between py-1" style="border-bottom:1px solid var(--line2)"><span class="font-semibold">'+
-    t.symbol+'</span><span class="mono">qty '+fmt(t.quantity,4)+' · entry '+fmt(t.entry_price,4)+'</span></div>').join('')
-    ||'<span style="color:var(--dim)">No open simulated positions.</span>';
+  const tot=p.open_total_unrealized_pnl||0, totCol=tot>=0?'var(--up)':'var(--down)';
+  document.getElementById('pOpenTotals').innerHTML=
+    'invested €'+fmt(p.open_total_invested,2)+
+    ' · unrealized <span style="color:'+totCol+'">'+(tot>=0?'+':'')+'€'+fmt(Math.abs(tot),2)+'</span>';
+  document.getElementById('pOpen').innerHTML=(p.open_positions||[]).map(t=>{
+    const pn=t.unrealized_pnl, pp=t.unrealized_pnl_pct;
+    const col=pn==null?'var(--dim)':(pn>=0?'var(--up)':'var(--down)');
+    const side=(t.side||'—').toUpperCase();
+    const sCol=side==='BUY'?'var(--up)':side==='SELL'?'var(--down)':'var(--dim)';
+    const pnlCell=pn==null?'<span style="color:var(--dim)">waiting…</span>':
+      ('<span style="color:'+col+'">'+(pn>=0?'+':'')+'€'+fmt(Math.abs(pn),2)+
+       ' <span style="color:var(--faint);font-size:11px">('+(pp>=0?'+':'')+fmt(pp,2)+'%)</span></span>');
+    return '<tr><td class="mono" style="color:var(--faint)">'+ldate(t.ts_open)+'</td>'+
+      '<td class="font-semibold">'+t.symbol+'</td>'+
+      '<td style="color:'+sCol+';font-weight:600">'+side+'</td>'+
+      '<td class="mono">'+fmt(t.quantity,4)+'</td>'+
+      '<td class="mono" style="color:var(--blue)">€'+fmt(t.invested,2)+'</td>'+
+      '<td class="mono">€'+fmt(t.entry_price,4)+'</td>'+
+      '<td class="mono">'+(t.price_now==null?'—':'€'+fmt(t.price_now,4))+'</td>'+
+      '<td class="mono">'+pnlCell+'</td></tr>';
+  }).join('')||'<tr><td colspan="8" style="color:var(--dim)">No open simulated positions — the bot opens positions during market hours.</td></tr>';
   document.getElementById('pClosed').innerHTML=(p.closed_trades||[]).map(t=>{
     const c=(t.pnl||0)>=0?'var(--up)':'var(--down)';
     return '<tr><td class="font-semibold">'+t.symbol+'</td><td>'+t.side+'</td>'+

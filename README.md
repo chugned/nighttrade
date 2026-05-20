@@ -16,7 +16,9 @@
 `nighttrade` is the equities sibling of `daytrade`: the same research-grade
 quant pipeline, re-grounded in the US stock market — market hours, session
 gaps, VWAP, relative volume and a tape-based microstructure layer instead of
-24/7 crypto and Level-2 order books.
+24/7 crypto and Level-2 order books. The paper account is **EUR-denominated**
+(stock prices are converted USD→EUR at the live rate) and defaults to **€1,000
+of simulated capital**.
 
 ---
 
@@ -56,6 +58,11 @@ trading-bot config        # show the active (validated) configuration
 trading-bot market-hours  # show the current US market session
 trading-bot rank          # cross-sectional ranking of the universe
 trading-bot rank --live   # ...ranked on the live S&P 500
+
+# research lab — strategy methodology (see docs/STRATEGY.md)
+trading-bot research            # purged walk-forward on real history + verdict
+trading-bot research --sweep    # Phase 1: grid ATR stop × reward:risk
+trading-bot research --meta     # Phase 4: train + score the meta-model
 
 # operations layer
 trading-bot watchlist     # screen the multi-stock watchlist for liquidity
@@ -144,11 +151,13 @@ prediction, and later compares predictions to what actually happened. It is
 crash-recovering and restart-safe — all state lives in a SQLite database
 (`artifacts/observatory.db`); logs go to `logs/nighttrade.log`.
 
-`trading-bot dashboard` opens a visual dashboard (default
-`http://127.0.0.1:8000`) with a giant **MARKET STATUS** card, a
-safety-score timeline, a per-symbol table, a cross-sectional **ranking board**
-(live long/short baskets), prediction-accuracy analytics, a paper-trading view
-and a risk console — live via WebSocket.
+`trading-bot dashboard` opens a visual dashboard with a giant
+**MARKET STATUS** card, a safety-score timeline, a per-symbol table, a
+cross-sectional **ranking board** (live long/short baskets), a **Strategy
+Gates** tab (Phase 1–4 filters, block counts, recent decisions), an
+**Investments** view (euros invested per stock), prediction-accuracy
+analytics, a paper-trading view with **live unrealized PnL per open
+position**, and a risk console — live via WebSocket.
 
 The **Market Safety Score** (0-100) summarizes conditions as
 `SAFE_TO_OBSERVE` / `WAIT` / `HIGH_RISK` / `UNSAFE`, with a market condition
@@ -182,6 +191,41 @@ The dashboard then shows, at a glance:
 The readiness score and reports never say "safe to invest" — only whether
 *paper conditions look stable* or the *strategy is currently unreliable*.
 
+## Strategy methodology — the five-phase research plan
+
+> Backtests are optimistic. "No edge" is the default, expected result. The
+> tool's job is to find out *whether* the strategy works, cheaply, on paper —
+> not to make it look good.
+
+Every strategy change is first proven in the research lab
+(`trading-bot research`), out-of-sample on real history, *before* it is wired
+into the live observer. Full results in [`docs/STRATEGY.md`](docs/STRATEGY.md).
+
+| Phase | Built | Honest verdict |
+|---|---|---|
+| **0** | Measurement harness — purged walk-forward on real history | baseline **50.2% WF accuracy, OVERFIT** |
+| **1** | ATR-width stops + triple-barrier time stop | time stop adopted; sweep overfit |
+| **2** | **Regime gate** — block trades in regimes below break-even win rate | gate live |
+| **3** | **Calibration gate** — isotonic-calibrated probability, not raw confidence | gate live |
+| **4** | **Meta-label gate** — secondary GB model scores P(target before stop) | **+1.7 pts — NO EDGE** |
+| **5** | All four gates wired into the live observer + **Strategy Gates** dashboard tab | gates live & visible |
+
+The dashboard's **Strategy Gates** tab (`/api/gates`) surfaces each gate's
+phase, threshold, all-time block count and a live feed of allowed/blocked
+decisions. A gate with zero blocks reads as *gathering evidence*, not idle —
+consistent with the low-sample passthrough built into Phases 2–3.
+
+## Deployment
+
+See [`docs/DEPLOY.md`](docs/DEPLOY.md). The included scripts (`deploy/install.sh`,
+`deploy/sync.sh`, `deploy/uninstall.sh`) install nighttrade as two macOS
+launchd LaunchAgents (`com.nighttrade.observer`, `com.nighttrade.dashboard`)
+that start on login, restart on crash and keep running with no terminal open.
+The dashboard is bound to the **Tailscale** interface only — reachable from
+your tailnet, not from the local LAN — and falls back to all interfaces when
+Tailscale is not detected. `deploy/sync.sh` rsyncs a dev checkout into the
+live `~/nighttrade` location and reloads the services.
+
 ## Project layout
 
 | Path | Purpose |
@@ -193,9 +237,11 @@ The readiness score and reports never say "safe to invest" — only whether
 | `src/nighttrade/indicators` | Vectorized technical indicators (no lookahead) |
 | `src/nighttrade/microstructure` | Tape-based stock microstructure analysis |
 | `src/nighttrade/features` | Shared online+offline feature pipeline |
-| `src/nighttrade/labels` | Offline-only label generation |
+| `src/nighttrade/labels` | Offline-only label generation + triple-barrier labels |
 | `src/nighttrade/ml` | Model training / inference |
-| `src/nighttrade/validation` | Walk-forward validation + leakage checks |
+| `src/nighttrade/validation` | Purged walk-forward validation + leakage checks |
+| `src/nighttrade/research` | Research lab — real-history backtest + ATR sweep + meta evaluator |
+| `src/nighttrade/gates` | Strategy gates: regime, calibration, meta-label |
 | `src/nighttrade/macro` | Macro context engine (mock / Gemini) |
 | `src/nighttrade/fusion` | AI decision-fusion engine |
 | `src/nighttrade/cross_section` | Cross-sectional factor ranking (long/short baskets) |

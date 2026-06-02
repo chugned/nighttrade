@@ -103,8 +103,15 @@ class AlertManager:
             _log.info(line)
 
         if self._db is not None:
+            # Route to alerts table — was incorrectly writing to errors,
+            # inflating the dashboard's error count with market
+            # observations like 'XYZ illiquid'. Fall back to insert_error
+            # on older schemas without insert_alert.
             try:
-                self._db.insert_error(f"alert:{alert.kind}", alert.message)
+                if hasattr(self._db, "insert_alert"):
+                    self._db.insert_alert(alert.level, alert.kind, alert.message)
+                else:
+                    self._db.insert_error(f"alert:{alert.kind}", alert.message)
             except Exception:  # noqa: BLE001 - alerting must never crash the loop
                 pass
         self._maybe_discord(alert)

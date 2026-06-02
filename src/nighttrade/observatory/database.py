@@ -536,8 +536,16 @@ class ObservatoryDB:
                 return d
         return self._one("SELECT * FROM bot_runs ORDER BY id DESC LIMIT 1")
 
-    def recent_errors(self, limit: int = 50) -> List[Dict[str, Any]]:
-        return self._all("SELECT * FROM errors ORDER BY id DESC LIMIT ?", (limit,))
+    def recent_errors(self, limit: int = 50,
+                      include_alerts: bool = False) -> List[Dict[str, Any]]:
+        """Real code-level errors. Excludes ``alert:*`` rows by default."""
+        if include_alerts:
+            return self._all(
+                "SELECT * FROM errors ORDER BY id DESC LIMIT ?", (limit,))
+        return self._all(
+            "SELECT * FROM errors "
+            "WHERE context IS NULL OR context NOT LIKE 'alert:%' "
+            "ORDER BY id DESC LIMIT ?", (limit,))
 
     def count(self, table: str) -> int:
         # table name is from a fixed internal set — not user input.

@@ -109,9 +109,13 @@ These were ported from daytrade because nighttrade had the same bugs:
   self-heal.
 - **0003**: `db.recent_errors()` excludes `context LIKE 'alert:%'` by default.
 - **0004**: `db.prune_old(days=30)` + day-rollover hook.
-- **0005**: `YFinanceFeed._refresh` uses `threads=8` (not `True`) — 503
-  symbols × `threads=True` exhausted the macOS thread limit at startup
-  (`RuntimeError: can't start new thread`).
+- **0005**: `YFinanceFeed._refresh` uses `threads=False` (sequential).
+  503 symbols × `threads=True` exhausted the macOS thread limit at
+  startup (`RuntimeError: can't start new thread`). `threads=8` was
+  tried as a compromise but still crashed when host thread pressure
+  was modest (2386/2784 user threads in use). Sequential fetch is
+  ~90s vs ~40s — still well inside the 300s cycle interval.
+  Pinned by `tests/test_live_feed_threads_invariant.py`.
 
 Nighttrade-specific items (no daytrade analog):
 - "no live data for X" from yfinance is caught as `ValueError` in
@@ -119,6 +123,22 @@ Nighttrade-specific items (no daytrade analog):
   NOT write to the errors table.
 - Per-symbol candle cache capped at `_MAX_CACHED_BARS_PER_SYMBOL = 500`
   to bound RAM growth on the 503-symbol universe.
+
+## Anti-patterns — DO NOT reintroduce
+
+These are bugs that were fixed once and have a regression test pinning
+them. If a test in this list fires, **read the linked ADR before
+"fixing" the test**.
+
+| Anti-pattern | Why it's banned | Pinned by |
+| --- | --- | --- |
+| `yf.download(threads=True)` or `threads=N` for any N > 0 | One OS thread per ticker × 503 symbols → `RuntimeError: can't start new thread` whenever the host has modest concurrent thread pressure. ADR-0005. | `tests/test_live_feed_threads_invariant.py` |
+| `ThreadPoolExecutor(max_workers=None)` over the symbol universe | Same family of bug as above — defaults to `os.cpu_count() * 5` workers, contributes to the thread-budget exhaustion. Use a hard small cap, or process sequentially. | (no pin yet — none in the codebase) |
+| Writing to `alerts` data via `insert_error` | Pollutes the dashboard error counter with informational messages. ADR-0001. | covered by alert-routing tests |
+
+If you need to add new parallelism, do it with a small explicit
+worker count (≤4) AND add a regression test that pins the upper
+bound.
 
 ## Operational facts
 

@@ -109,17 +109,18 @@ class YFinanceFeed:
             len(self._symbols),
             self._eur_per_usd,
         )
-        # NT-CRASH fix: yfinance with threads=True spawns one thread per
-        # ticker (503 for S&P 500). macOS rejects that many concurrent
-        # threads with "RuntimeError: can't start new thread", crashing
-        # the bot at startup. Cap concurrency at 8 — gives most of the
-        # speedup with no risk of exhausting the OS thread limit.
+        # NT-CRASH fix (revised, see ADR-0005): yfinance.threads=True
+        # spawns one OS thread per ticker (503 for S&P 500). Even
+        # threads=8 can crash under modest concurrent thread pressure —
+        # macOS ulimit -u is ~2800 and a busy host easily eats most of
+        # that. Sequential fetch is bulletproof: ~90s vs ~40s, well
+        # under the 300s cycle interval.
         data = yf.download(
             self._symbols,
             period=self._period,
             interval="1m",
             group_by="ticker",
-            threads=8,
+            threads=False,
             progress=False,
             auto_adjust=False,
         )

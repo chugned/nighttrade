@@ -29,3 +29,29 @@ echo "synced $SRC -> $DEST"
 
 # Reinstall — regenerates the wrapper + plists for THIS machine and reloads.
 "$DEST/deploy/install.sh" "$PORT"
+
+# launchd's KeepAlive doesn't always respawn after a graceful SIGTERM
+# (observed 2026-06-02 — the observer stayed dead after install.sh's
+# bootout/bootstrap because the prior process exited 0). Force-kick
+# both services so we never leave a deploy half-done.
+U=$(id -u)
+for svc in com.nighttrade.observer com.nighttrade.dashboard; do
+  launchctl kickstart -k "gui/$U/$svc" >/dev/null 2>&1 || true
+done
+
+# Health check — observer must show a PID within 15s, dashboard must
+# bind :$PORT. If either doesn't, surface the failure loudly so the
+# operator catches it now (not next morning).
+sleep 2  # let launchd settle
+fail=0
+if ! pgrep -f 'nighttrade observe' >/dev/null; then
+  echo "  WARN: observer did not respawn after kickstart" >&2
+  fail=1
+fi
+if ! lsof -i :"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "  WARN: dashboard not bound on :$PORT after kickstart" >&2
+  fail=1
+fi
+if [ "$fail" -eq 0 ]; then
+  echo "  health: observer + dashboard both up"
+fi

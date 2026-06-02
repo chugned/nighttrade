@@ -240,6 +240,16 @@ class Observer:
         # 503 symbols × ~3 inserts each = ~1500 commits/cycle becomes 1.
         # SQLite WAL is dramatically faster at many small inserts inside
         # one transaction than at many small transactions.
+        #
+        # NOTE: a ThreadPoolExecutor here would parallelise CPU work
+        # but segfaults under concurrent DB writes from worker threads
+        # (observed 2026-06-02 — even with check_same_thread=False the
+        # SQLite C library is not safe for concurrent ops on a single
+        # connection from worker threads at this Python version).
+        # The right fix is a worker-then-aggregator split where
+        # workers compute pure data + main thread does DB writes;
+        # deferred for now since cycle work already fits in the
+        # configured interval with room to spare.
         with self.db.batch():
             for symbol in self.watchlist_config.symbols:
                 self._set_now("Running technical analysis", symbol, now)

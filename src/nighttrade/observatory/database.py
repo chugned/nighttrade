@@ -182,6 +182,75 @@ class ObservatoryDB:
                             (prediction_id,))
         self._conn.commit()
 
+    def upsert_outcome_and_mark_evaluated(
+            self, prediction_id: int, **f: Any) -> None:
+        """Ported from daytrade QA-HIGH-1: outcome upsert + evaluated
+        flag in one transaction, so a crash between them does NOT
+        cause duplicate work on the next cycle."""
+        cols = {"prediction_id": prediction_id, "evaluated_ts": _now(), **f}
+        placeholders = ", ".join("?" for _ in cols)
+        names = ", ".join(cols)
+        updates = ", ".join(f"{k}=excluded.{k}" for k in cols
+                            if k != "prediction_id")
+        try:
+            self._conn.execute("BEGIN")
+            self._conn.execute(
+                f"INSERT INTO prediction_outcomes ({names}) "
+                f"VALUES ({placeholders}) "
+                f"ON CONFLICT(prediction_id) DO UPDATE SET {updates}",
+                list(cols.values()),
+            )
+            self._conn.execute(
+                "UPDATE predictions SET evaluated=1 WHERE id=?",
+                (prediction_id,))
+            self._conn.commit()
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    def total_realised_pnl(self) -> float:
+        """Ported from daytrade QA-HIGH-6: SUM over all closed trades,
+        not a 500-row window."""
+        row = self._conn.execute(
+            "SELECT COALESCE(SUM(pnl), 0.0) FROM paper_trades "
+            "WHERE status='closed'").fetchone()
+        return float(row[0] if row else 0.0)
+
+    def historical_peak_equity(self) -> float:
+        """Ported from daytrade QA-HIGH-2: MAX equity from safety_scores
+        so Observer can seed _peak_equity on restart."""
+        row = self._conn.execute(
+            "SELECT MAX(equity) FROM safety_scores "
+            "WHERE equity IS NOT NULL").fetchone()
+        peak = row[0] if row and row[0] is not None else 0.0
+        return float(peak)
+
+    def prune_old(self, days: int = 30) -> Dict[str, int]:
+        """Ported from daytrade QA-HIGH-3: drop aged rows + checkpoint
+        the WAL. Safe to call from the daily roll-over."""
+        cutoff = "datetime('now', '-' || ? || ' days')"
+        targets = {
+            "activity_events": "ts",
+            "market_snapshots": "ts",
+            "symbol_health": "ts",
+        }
+        deleted: Dict[str, int] = {}
+        for table, ts_col in targets.items():
+            try:
+                cur = self._conn.execute(
+                    f"DELETE FROM {table} WHERE {ts_col} < {cutoff}",
+                    (days,))
+                deleted[table] = cur.rowcount
+            except sqlite3.OperationalError:
+                deleted[table] = 0
+        self._conn.commit()
+        try:
+            self._conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            self._conn.execute("PRAGMA optimize")
+        except sqlite3.OperationalError:
+            pass
+        return deleted
+
     def insert_paper_trade(self, **f: Any) -> int:
         return self._insert("paper_trades",
                             {"ts_open": f.get("ts_open", _now()),

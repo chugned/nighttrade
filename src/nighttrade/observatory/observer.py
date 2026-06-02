@@ -157,7 +157,13 @@ class Observer:
         # symbol -> open paper position {trade_id, qty, entry, stop, target}
         self._open: Dict[str, Dict[str, float]] = {}
         self._risk = RiskEngine(config.risk, self._starting_cash)
-        self._peak_equity = self._starting_cash
+        # Ported from daytrade QA-HIGH-2: seed peak from DB so drawdown
+        # reports survive restart honestly.
+        try:
+            historic_peak = float(self.db.historical_peak_equity())
+        except (AttributeError, TypeError, ValueError, Exception):  # noqa: BLE001
+            historic_peak = 0.0
+        self._peak_equity = max(self._starting_cash, historic_peak)
 
     # -- lifecycle -----------------------------------------------------------
 
@@ -460,9 +466,14 @@ class Observer:
                 self.db.mark_prediction_evaluated(prediction["id"])
                 continue
             if outcome is not None:
-                self.db.upsert_outcome(prediction["id"], **outcome)
+                # Ported from daytrade QA-HIGH-1: single transaction so
+                # a crash between upsert and the evaluated flag does
+                # NOT cause duplicate work on the next cycle.
+                self.db.upsert_outcome_and_mark_evaluated(
+                    prediction["id"], **outcome)
                 evaluated += 1
-            self.db.mark_prediction_evaluated(prediction["id"])
+            else:
+                self.db.mark_prediction_evaluated(prediction["id"])
         return evaluated
 
     def _rank_cross_section(self, now: datetime, summary: CycleSummary) -> None:
@@ -670,6 +681,15 @@ class Observer:
                            f"day {day_number}", level="info")
             _log.info("day %d rolled up (%s): %s", day_number, day_date,
                       metric.get("status"))
+            # Ported from daytrade QA-HIGH-3: prune old high-volume rows
+            # + WAL checkpoint. Keeps the DB from growing forever.
+            try:
+                pruned = self.db.prune_old(days=30)
+                total = sum(pruned.values())
+                if total:
+                    _log.info("pruned %d old rows: %s", total, pruned)
+            except (AttributeError, Exception) as exc:  # noqa: BLE001
+                _log.warning("prune_old failed: %s", exc)
         except Exception as exc:  # noqa: BLE001 - rollover must not crash the loop
             self.db.insert_error("day_rollover", repr(exc))
 
@@ -768,7 +788,14 @@ class Observer:
 
     def _equity(self, now: datetime) -> float:
         """Simulated equity = cash + realised PnL + open unrealised PnL."""
-        realized = sum(t["pnl"] or 0.0 for t in self.db.closed_paper_trades())
+        # Ported from daytrade QA-HIGH-6: SUM over the full table, not
+        # a 500-row window. After 500 closed trades the windowed
+        # approach silently under-reported PnL.
+        try:
+            realized = self.db.total_realised_pnl()
+        except AttributeError:
+            realized = sum(t["pnl"] or 0.0
+                           for t in self.db.closed_paper_trades())
         unrealized = 0.0
         for symbol, pos in self._open.items():
             price = self.feed.price_at(symbol, now)

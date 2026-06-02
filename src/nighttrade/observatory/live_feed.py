@@ -73,6 +73,15 @@ class YFinanceFeed:
             return
         self._refresh()
 
+    #: NT-EFF: cap the per-symbol candle list at this many bars in the
+    #: in-memory cache. Downstream callers ask for n_bars=240 (analysis)
+    #: or n_bars=400 (idle training); 500 leaves comfortable headroom
+    #: while cutting cache footprint from ~390k OHLCV pydantic objects
+    #: (503 syms × 780 bars from a 2-day yfinance pull) to ~250k. The
+    #: lopped older bars are still accessible via the next refresh from
+    #: yfinance if a longer history is genuinely needed.
+    _MAX_CACHED_BARS_PER_SYMBOL = 500
+
     def _refresh(self) -> None:
         try:
             import yfinance as yf
@@ -89,6 +98,7 @@ class YFinanceFeed:
                            group_by="ticker", threads=True, progress=False,
                            auto_adjust=False)
         cache: Dict[str, List[OHLCV]] = {}
+        cap = self._MAX_CACHED_BARS_PER_SYMBOL
         for sym in self._symbols:
             try:
                 frame = data[sym] if len(self._symbols) > 1 else data
@@ -96,7 +106,8 @@ class YFinanceFeed:
                 continue
             candles = self._frame_to_candles(sym, frame)
             if len(candles) >= 30:  # need enough tape for the analysis layers
-                cache[sym] = candles
+                # NT-EFF: keep only the most recent ``cap`` bars in cache
+                cache[sym] = candles[-cap:]
         if cache:
             # NT-LEAK fix: drop the old cache BEFORE assigning the new one
             # so the giant pandas DataFrames are freed for GC immediately.
@@ -104,8 +115,8 @@ class YFinanceFeed:
             self._cache = cache
             self._fetched_monotonic = _time.monotonic()
             del old_cache
-            _log.info("live feed cached %d/%d symbols",
-                      len(cache), len(self._symbols))
+            _log.info("live feed cached %d/%d symbols (cap=%d bars/sym)",
+                      len(cache), len(self._symbols), cap)
         else:
             _log.warning("live feed refresh returned no usable data")
         # NT-LEAK fix: yfinance internally accumulates session state +

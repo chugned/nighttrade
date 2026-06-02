@@ -33,8 +33,9 @@ _MIN_TRAIN_ROWS = 50
 
 
 def build_meta_dataset(
-    candles: List[OHLCV], config: AppConfig,
-) -> "Tuple[pd.DataFrame, pd.Series, List[str]]":
+    candles: List[OHLCV],
+    config: AppConfig,
+) -> Tuple[pd.DataFrame, pd.Series, List[str]]:
     """Assemble features + triple-barrier meta-labels, aligned and NaN-free."""
     frame = ohlcv_to_frame(candles)
     pipeline = FeaturePipeline(config.features, config.indicators)
@@ -59,7 +60,7 @@ class MetaModel:
     def is_trained(self) -> bool:
         return self._estimator is not None
 
-    def fit(self, X: pd.DataFrame, y: pd.Series) -> "MetaModel":
+    def fit(self, X: pd.DataFrame, y: pd.Series) -> MetaModel:
         """Train the gradient-boosting meta-classifier on (features, labels)."""
         if len(y) < _MIN_TRAIN_ROWS or y.nunique() < 2:
             return self  # too little evidence / single class — stay untrained
@@ -71,8 +72,7 @@ class MetaModel:
         self.version = f"meta-gb-n{self.samples}"
         return self
 
-    def fit_from_candles(self, candle_series: List[List[OHLCV]],
-                         config: AppConfig) -> "MetaModel":
+    def fit_from_candles(self, candle_series: List[List[OHLCV]], config: AppConfig) -> MetaModel:
         """Pool triple-barrier datasets from many symbols, then fit."""
         x_parts: List[pd.DataFrame] = []
         y_parts: List[pd.Series] = []
@@ -86,8 +86,9 @@ class MetaModel:
                 y_parts.append(labels)
         if not x_parts:
             return self
-        return self.fit(pd.concat(x_parts, ignore_index=True),
-                        pd.concat(y_parts, ignore_index=True))
+        return self.fit(
+            pd.concat(x_parts, ignore_index=True), pd.concat(y_parts, ignore_index=True)
+        )
 
     def probability(self, candles: List[OHLCV], config: AppConfig) -> float:
         """P(win) for the latest bar of ``candles`` — uses features only."""
@@ -111,14 +112,20 @@ class MetaModel:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("wb") as fh:
-            pickle.dump({"estimator": self._estimator,
-                         "feature_names": self.feature_names,
-                         "samples": self.samples, "version": self.version,
-                         "seed": self.seed}, fh)
+            pickle.dump(
+                {
+                    "estimator": self._estimator,
+                    "feature_names": self.feature_names,
+                    "samples": self.samples,
+                    "version": self.version,
+                    "seed": self.seed,
+                },
+                fh,
+            )
         return path
 
     @classmethod
-    def load(cls, path: Path | str) -> "MetaModel":
+    def load(cls, path: Path | str) -> MetaModel:
         with Path(path).open("rb") as fh:
             data = pickle.load(fh)
         model = cls(seed=data.get("seed", 42))
@@ -145,8 +152,8 @@ class MetaGate:
             return GateDecision(
                 False,
                 f"meta-model P(win) {prob:.0%} below floor "
-                f"{self.min_probability:.0%} — low-precision trade vetoed")
+                f"{self.min_probability:.0%} — low-precision trade vetoed",
+            )
         return GateDecision(
-            True,
-            f"meta-model P(win) {prob:.0%} clears floor "
-            f"{self.min_probability:.0%}")
+            True, f"meta-model P(win) {prob:.0%} clears floor " f"{self.min_probability:.0%}"
+        )

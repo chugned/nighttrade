@@ -39,7 +39,7 @@ from ..pipeline import AnalysisPipeline
 from ..risk import RiskEngine, position_size
 from ..runtime import add_file_logging, get_logger
 from ..watchlist import WatchlistScreener, extract_metrics
-from .alerts import AlertManager, Alert, LEVEL_CRITICAL, build_condition_alerts
+from .alerts import LEVEL_CRITICAL, Alert, AlertManager, build_condition_alerts
 from .daily_report import write_daily_report
 from .database import ObservatoryDB
 from .feed import LiveMockFeed
@@ -68,15 +68,20 @@ _NOW_PATH = _REPO_ROOT / "data" / "now.json"
 # model on real data instead of sitting idle.
 _MODEL_PATH = _REPO_ROOT / "artifacts" / "model.pkl"
 _META_MODEL_PATH = _REPO_ROOT / "artifacts" / "meta_model.pkl"
-_MODEL_RETRAIN_HOURS = 12.0   # retrain only when the model is older than this
-_TRAIN_SYMBOL_SAMPLE = 120    # symbols sampled to build the training set
+_MODEL_RETRAIN_HOURS = 12.0  # retrain only when the model is older than this
+_TRAIN_SYMBOL_SAMPLE = 120  # symbols sampled to build the training set
 
 # The 10 steps of one observation cycle (for the dashboard "Now" panel).
 CYCLE_STEPS = [
-    "Fetching market data", "Validating liquidity",
-    "Running technical analysis", "Running orderbook analysis",
-    "Running macro/regime analysis", "Creating prediction",
-    "Simulating trade", "Updating outcomes", "Saving metrics",
+    "Fetching market data",
+    "Validating liquidity",
+    "Running technical analysis",
+    "Running orderbook analysis",
+    "Running macro/regime analysis",
+    "Creating prediction",
+    "Simulating trade",
+    "Updating outcomes",
+    "Saving metrics",
     "Waiting for next cycle",
 ]
 
@@ -123,16 +128,12 @@ class Observer:
         self.pipeline = AnalysisPipeline(config, model)
         self.screener = WatchlistScreener(watchlist_config)
         # Phase 2 — the regime gate. Reward:risk = target/stop volatility mults.
-        reward_risk = (config.fusion.target_vol_mult
-                       / max(config.fusion.stop_vol_mult, 1e-9))
-        self.regime_gate = RegimeGate(reward_risk,
-                                      config.gates.regime_min_samples)
+        reward_risk = config.fusion.target_vol_mult / max(config.fusion.stop_vol_mult, 1e-9)
+        self.regime_gate = RegimeGate(reward_risk, config.gates.regime_min_samples)
         # Phase 3 — the confidence-calibration gate. The calibrator is refit
         # from evaluated history each cycle; the gate reads it live.
-        self.calibrator = ConfidenceCalibrator(
-            config.gates.calibration_min_samples)
-        self.calibration_gate = CalibrationGate(
-            self.calibrator, config.gates.calibration_floor)
+        self.calibrator = ConfidenceCalibrator(config.gates.calibration_min_samples)
+        self.calibration_gate = CalibrationGate(self.calibrator, config.gates.calibration_floor)
         # Phase 4 — the meta-labelling gate. Loads a saved meta-model if one
         # exists; (re)trained during market-closed downtime.
         self.meta_model = MetaModel(config.runtime.random_seed)
@@ -141,10 +142,8 @@ class Observer:
                 self.meta_model = MetaModel.load(_META_MODEL_PATH)
             except Exception:  # noqa: BLE001 - a bad pickle must not block startup
                 pass
-        self.meta_gate = MetaGate(self.meta_model,
-                                  config.gates.meta_min_probability)
-        self.alerts = AlertManager(
-            db=self.db, allow_network=config.runtime.allow_network)
+        self.meta_gate = MetaGate(self.meta_model, config.gates.meta_min_probability)
+        self.alerts = AlertManager(db=self.db, allow_network=config.runtime.allow_network)
         # Optional 30-day learning session (set by `nighttrade learn`).
         self.learning_session = learning_session
 
@@ -176,21 +175,26 @@ class Observer:
             _log.warning("recovered %d crashed/abandoned prior run(s)", crashed)
         self._run_id = self.db.start_bot_run(pid=os.getpid())
         self._reload_open_positions()
-        _log.info("observer run #%d started (pid=%d), %d open position(s) reloaded",
-                  self._run_id, os.getpid(), len(self._open))
+        _log.info(
+            "observer run #%d started (pid=%d), %d open position(s) reloaded",
+            self._run_id,
+            os.getpid(),
+            len(self._open),
+        )
 
     def stop(self, status: str = "stopped") -> None:
         if self._run_id is not None:
             self.db.stop_bot_run(self._run_id, status)
-        _log.info("observer run #%d %s after %d cycle(s)",
-                  self._run_id, status, self._cycle)
+        _log.info("observer run #%d %s after %d cycle(s)", self._run_id, status, self._cycle)
 
     def _reload_open_positions(self) -> None:
         """Restart-safety: re-adopt paper positions left open by a prior run."""
         for trade in self.db.open_paper_trades():
             self._open[trade["symbol"]] = {
-                "trade_id": trade["id"], "qty": trade["quantity"],
-                "entry": trade["entry_price"], "stop": trade["stop"],
+                "trade_id": trade["id"],
+                "qty": trade["quantity"],
+                "entry": trade["entry_price"],
+                "stop": trade["stop"],
                 "target": trade["target"],
             }
 
@@ -212,8 +216,11 @@ class Observer:
         feed_is_live = getattr(self.feed, "respects_market_hours", False)
         self._market_open = (not feed_is_live) or is_market_open(now)
         if feed_is_live and not self._market_open:
-            self._activity("market closed — observing the last session",
-                           "no new predictions until the open", level="info")
+            self._activity(
+                "market closed — observing the last session",
+                "no new predictions until the open",
+                level="info",
+            )
         summary = CycleSummary(cycle=self._cycle, timestamp=now.isoformat())
         self._set_now("Fetching market data", "", now)
         self._activity(f"cycle {self._cycle} started", level="info")
@@ -232,8 +239,7 @@ class Observer:
         for symbol in self.watchlist_config.symbols:
             self._set_now("Running technical analysis", symbol, now)
             try:
-                assessment = self._observe_symbol(symbol, now, memory,
-                                                  recent_accuracy, equity)
+                assessment = self._observe_symbol(symbol, now, memory, recent_accuracy, equity)
             except ValueError as exc:
                 # "no live data for X" is a data-quality issue, not a
                 # code bug. yfinance may have no intraday data for the
@@ -246,8 +252,10 @@ class Observer:
                         self._data_gap_logged: set = set()
                     if symbol not in self._data_gap_logged:
                         _log.warning(
-                            "data gap for %s (%s) — skipping until "
-                            "yfinance returns data", symbol, msg)
+                            "data gap for %s (%s) — skipping until " "yfinance returns data",
+                            symbol,
+                            msg,
+                        )
                         self._data_gap_logged.add(symbol)
                     continue
                 # A different ValueError is a real bug — fall through.
@@ -282,8 +290,10 @@ class Observer:
         self._set_now("Updating outcomes", "", now)
         summary.predictions_evaluated = self._evaluate_predictions(now)
         if summary.predictions_evaluated:
-            self._activity(f"{summary.predictions_evaluated} prediction(s) "
-                           "evaluated against reality", level="info")
+            self._activity(
+                f"{summary.predictions_evaluated} prediction(s) " "evaluated against reality",
+                level="info",
+            )
 
         # Manage open paper positions (stop / target exits).
         summary.closed_this_cycle = self._manage_positions(now)
@@ -292,8 +302,9 @@ class Observer:
         equity = self._equity(now)
         summary.equity = round(equity, 2)
         self._peak_equity = max(self._peak_equity, equity)
-        drawdown = (self._peak_equity - equity) / self._peak_equity \
-            if self._peak_equity > 0 else 0.0
+        drawdown = (
+            (self._peak_equity - equity) / self._peak_equity if self._peak_equity > 0 else 0.0
+        )
         summary.drawdown_pct = round(drawdown, 4)
 
         # Global safety score.
@@ -304,26 +315,33 @@ class Observer:
         summary.global_condition = global_assessment.condition
         self.db.insert_safety_score(
             ts=now.isoformat(),
-            score=global_assessment.score, status=global_assessment.status,
+            score=global_assessment.score,
+            status=global_assessment.status,
             condition=global_assessment.condition,
             reasons=global_assessment.reasons,
             breakdown=global_assessment.breakdown,
-            equity=round(equity, 2), drawdown_pct=round(drawdown, 4))
+            equity=round(equity, 2),
+            drawdown_pct=round(drawdown, 4),
+        )
         # Per-cycle regime record (drives the regime timeline).
-        day_no = (self.learning_session.day_number(now)
-                  if self.learning_session else 0)
+        day_no = self.learning_session.day_number(now) if self.learning_session else 0
         self.db.insert_regime_period(
-            ts=now.isoformat(), day_number=day_no,
+            ts=now.isoformat(),
+            day_number=day_no,
             condition=global_assessment.condition,
             regime=global_assessment.condition.lower(),
-            safety_score=global_assessment.score)
+            safety_score=global_assessment.score,
+        )
 
         # Alerts.
         alerts = build_condition_alerts(
             global_condition=global_assessment.condition,
-            illiquid_symbols=illiquid, paper_drawdown_pct=drawdown,
+            illiquid_symbols=illiquid,
+            paper_drawdown_pct=drawdown,
             max_drawdown_pct=self.config.risk.max_daily_loss_pct,
-            recent_accuracy=recent_accuracy, now=now)
+            recent_accuracy=recent_accuracy,
+            now=now,
+        )
         for alert in alerts:
             if self.alerts.emit(alert):
                 summary.alerts.append(f"{alert.kind}: {alert.message}")
@@ -339,14 +357,21 @@ class Observer:
             self.db.heartbeat(self._run_id, self._cycle)
         self._write_cycle_report(summary)
         self._set_now("Waiting for next cycle", "", now, done=True)
-        _log.info("cycle %d: score=%.0f %s/%s | %d tradeable | equity=%.0f "
-                  "dd=%.1f%%", summary.cycle, summary.global_score,
-                  summary.global_status, summary.global_condition,
-                  summary.tradeable, summary.equity, summary.drawdown_pct * 100)
+        _log.info(
+            "cycle %d: score=%.0f %s/%s | %d tradeable | equity=%.0f " "dd=%.1f%%",
+            summary.cycle,
+            summary.global_score,
+            summary.global_status,
+            summary.global_condition,
+            summary.tradeable,
+            summary.equity,
+            summary.drawdown_pct * 100,
+        )
         return summary
 
-    def _observe_symbol(self, symbol: str, now: datetime, memory,
-                        recent_accuracy: Optional[float], equity: float):
+    def _observe_symbol(
+        self, symbol: str, now: datetime, memory, recent_accuracy: Optional[float], equity: float
+    ):
         """Observe one symbol: analyse, score, record, maybe paper-trade."""
         candles = self.feed.candles_at(symbol, now, n_bars=240)
         orderbook = self.feed.orderbook_at(symbol, now)
@@ -361,10 +386,11 @@ class Observer:
         metrics = extract_metrics(symbol, tick, orderbook, candles)
         screening = self.screener.screen_one(symbol, tick, orderbook, candles)
 
-        liquidity_notional = (orderbook.notional_depth("bid")
-                              + orderbook.notional_depth("ask"))
-        panic = (macro.regime_label in ("panic", "war", "credit_crisis")
-                 or result.kill_switch.macro_triggered)
+        liquidity_notional = orderbook.notional_depth("bid") + orderbook.notional_depth("ask")
+        panic = (
+            macro.regime_label in ("panic", "war", "credit_crisis")
+            or result.kill_switch.macro_triggered
+        )
         spread_bps = micro.spread_bps or 0.0
         slippage_bps = self.config.risk.base_slippage_bps + spread_bps * 0.5
         trend_strength = min(1.2, abs(tech.trend_slope or 0.0) / 0.002)
@@ -372,59 +398,82 @@ class Observer:
         if symbol in memory.by_symbol and memory.by_symbol[symbol].samples >= 5:
             sym_accuracy = memory.by_symbol[symbol].accuracy
 
-        safety = compute_safety_score(SafetyInputs(
-            trend_strength=trend_strength,
-            volatility=tech.volatility or 0.0,
-            liquidity_notional=liquidity_notional,
-            spread_bps=spread_bps,
-            imbalance=micro.imbalance,
-            chop=micro.chop_zone,
-            slippage_estimate_bps=slippage_bps,
-            panic=panic,
-            recent_accuracy=sym_accuracy if sym_accuracy is not None
-            else recent_accuracy,
-            paper_drawdown_pct=0.0,
-            prediction_reliability=recent_accuracy,
-        ))
+        safety = compute_safety_score(
+            SafetyInputs(
+                trend_strength=trend_strength,
+                volatility=tech.volatility or 0.0,
+                liquidity_notional=liquidity_notional,
+                spread_bps=spread_bps,
+                imbalance=micro.imbalance,
+                chop=micro.chop_zone,
+                slippage_estimate_bps=slippage_bps,
+                panic=panic,
+                recent_accuracy=sym_accuracy if sym_accuracy is not None else recent_accuracy,
+                paper_drawdown_pct=0.0,
+                prediction_reliability=recent_accuracy,
+            )
+        )
 
         # --- persist snapshot, prediction, symbol health ---
         # Timestamps use the OBSERVATION time so prediction outcomes can be
         # evaluated against the feed at exactly predicted_ts + horizon.
         ts = now.isoformat()
         self.db.insert_snapshot(
-            ts=ts, symbol=symbol, price=price, rsi=tech.rsi, macd=tech.macd,
-            volatility=tech.volatility, trend_slope=tech.trend_slope,
-            spread_bps=spread_bps, imbalance=micro.imbalance,
-            chop=int(micro.chop_zone), liquidity_notional=liquidity_notional,
-            regime=micro.regime.value)
+            ts=ts,
+            symbol=symbol,
+            price=price,
+            rsi=tech.rsi,
+            macd=tech.macd,
+            volatility=tech.volatility,
+            trend_slope=tech.trend_slope,
+            spread_bps=spread_bps,
+            imbalance=micro.imbalance,
+            chop=int(micro.chop_zone),
+            liquidity_notional=liquidity_notional,
+            regime=micro.regime.value,
+        )
 
         # A prediction is only recorded while the market is open — one made
         # against a frozen, closed-market tape cannot be honestly evaluated.
         prediction_id = None
         if self._market_open:
             prediction_id = self.db.insert_prediction(
-                ts=ts, symbol=symbol, direction=decision.action.value,
-                confidence=decision.confidence, entry=decision.entry,
-                stop=decision.stop, target=decision.target,
+                ts=ts,
+                symbol=symbol,
+                direction=decision.action.value,
+                confidence=decision.confidence,
+                entry=decision.entry,
+                stop=decision.stop,
+                target=decision.target,
                 market_condition=safety.condition,
-                fused_score=decision.fused_score, reasons=decision.reasoning)
+                fused_score=decision.fused_score,
+                reasons=decision.reasoning,
+            )
 
         status = self._symbol_status(safety, screening, decision)
         self.db.insert_symbol_health(
-            ts=ts, symbol=symbol, price=price, volume_24h=metrics.volume_24h_usd,
-            spread_bps=spread_bps, book_notional=liquidity_notional,
-            healthy=int(screening.approved), rejections=screening.rejections,
-            recent_accuracy=sym_accuracy, safety_score=safety.score,
-            status=status)
+            ts=ts,
+            symbol=symbol,
+            price=price,
+            volume_24h=metrics.volume_24h_usd,
+            spread_bps=spread_bps,
+            book_notional=liquidity_notional,
+            healthy=int(screening.approved),
+            rejections=screening.rejections,
+            recent_accuracy=sym_accuracy,
+            safety_score=safety.score,
+            status=status,
+        )
 
         # --- activity feed ---
         if not screening.approved:
             reason = screening.rejections[0] if screening.rejections else "filtered"
             self._activity(f"skipped {symbol}", reason)
         elif self._market_open and decision.action.value != "hold":
-            self._activity(f"prediction created for {symbol}",
-                           f"{decision.action.value.upper()} "
-                           f"conf {decision.confidence:.0%}")
+            self._activity(
+                f"prediction created for {symbol}",
+                f"{decision.action.value.upper()} " f"conf {decision.confidence:.0%}",
+            )
         else:
             self._activity(f"scanning {symbol}", f"condition {safety.condition}")
 
@@ -434,31 +483,38 @@ class Observer:
             # (Phase 3). The first gate to object blocks the entry.
             checks = (
                 ("regime", self.regime_gate.evaluate(safety.condition, memory)),
-                ("calibration",
-                 self.calibration_gate.evaluate(decision.confidence)),
+                ("calibration", self.calibration_gate.evaluate(decision.confidence)),
                 ("meta", self.meta_gate.evaluate(candles, self.config)),
             )
-            blocked = next(((name, g) for name, g in checks
-                            if not g.allowed), None)
+            blocked = next(((name, g) for name, g in checks if not g.allowed), None)
             if blocked is not None and decision.action is not Action.HOLD:
                 name, gate = blocked
-                self.db.insert_gate_event(symbol=symbol, gate=name,
-                                          allowed=False, reason=gate.reason)
+                self.db.insert_gate_event(
+                    symbol=symbol, gate=name, allowed=False, reason=gate.reason
+                )
                 self._activity(f"{name} gate blocked {symbol}", gate.reason)
             else:
                 if decision.action is not Action.HOLD:
                     self.db.insert_gate_event(
-                        symbol=symbol, gate="all", allowed=True,
-                        reason="cleared regime + calibration + meta gates")
-                self._maybe_open_position(symbol, decision, screening, price,
-                                          liquidity_notional, equity, now,
-                                          prediction_id)
+                        symbol=symbol,
+                        gate="all",
+                        allowed=True,
+                        reason="cleared regime + calibration + meta gates",
+                    )
+                self._maybe_open_position(
+                    symbol,
+                    decision,
+                    screening,
+                    price,
+                    liquidity_notional,
+                    equity,
+                    now,
+                    prediction_id,
+                )
 
         # --- collect this stock's factors for the cross-sectional ranking ---
-        ml_score = (result.ml.score if self.pipeline.model is not None
-                    else None)
-        snapshot = compute_factors(symbol, candles, self.config.cross_section,
-                                   ml_score)
+        ml_score = result.ml.score if self.pipeline.model is not None else None
+        snapshot = compute_factors(symbol, candles, self.config.cross_section, ml_score)
         if snapshot is not None:
             self._cycle_factors.append(snapshot)
         return safety
@@ -485,16 +541,19 @@ class Observer:
             try:
                 outcome, _ = evaluate_prediction(prediction, self.feed, now)
             except Exception as exc:  # noqa: BLE001 - one symbol can't kill the cycle
-                _log.warning("could not evaluate prediction %s (%s): %s",
-                             prediction.get("id"), prediction.get("symbol"), exc)
+                _log.warning(
+                    "could not evaluate prediction %s (%s): %s",
+                    prediction.get("id"),
+                    prediction.get("symbol"),
+                    exc,
+                )
                 self.db.mark_prediction_evaluated(prediction["id"])
                 continue
             if outcome is not None:
                 # Ported from daytrade QA-HIGH-1: single transaction so
                 # a crash between upsert and the evaluated flag does
                 # NOT cause duplicate work on the next cycle.
-                self.db.upsert_outcome_and_mark_evaluated(
-                    prediction["id"], **outcome)
+                self.db.upsert_outcome_and_mark_evaluated(prediction["id"], **outcome)
                 evaluated += 1
             else:
                 self.db.mark_prediction_evaluated(prediction["id"])
@@ -513,10 +572,12 @@ class Observer:
 
         def _row(s) -> Dict[str, object]:
             return {
-                "symbol": s.symbol, "rank": s.rank,
+                "symbol": s.symbol,
+                "rank": s.rank,
                 "percentile": round(s.percentile, 4),
                 "composite_z": round(s.composite_z, 4),
-                "basket": s.basket, "price": round(s.price, 2),
+                "basket": s.basket,
+                "price": round(s.price, 2),
                 "factors": {k: round(v, 3) for k, v in s.factor_z.items()},
             }
 
@@ -536,7 +597,8 @@ class Observer:
         summary.ranking_shorts = len(ranked.short_basket)
         self._activity(
             f"ranked {len(ranked.stocks)} stocks cross-sectionally",
-            f"long {summary.ranking_longs} / short {summary.ranking_shorts}")
+            f"long {summary.ranking_longs} / short {summary.ranking_shorts}",
+        )
 
     def _fit_calibrator(self, outcomes: List[Dict]) -> None:
         """Refit the confidence calibrator from evaluated prediction history.
@@ -564,16 +626,18 @@ class Observer:
         ``_MODEL_RETRAIN_HOURS``. Any failure is logged, never fatal.
         """
         try:
-            age_h = ((time.time() - _MODEL_PATH.stat().st_mtime) / 3600.0
-                     if _MODEL_PATH.exists() else 1e9)
+            age_h = (
+                (time.time() - _MODEL_PATH.stat().st_mtime) / 3600.0
+                if _MODEL_PATH.exists()
+                else 1e9
+            )
         except OSError:
             age_h = 1e9
         if age_h < _MODEL_RETRAIN_HOURS:
             return  # the model is still fresh — nothing to do
 
         self._set_now("Training the ML model (market closed)", "", now)
-        self._activity("market closed — training the ML model on real data",
-                        level="info")
+        self._activity("market closed — training the ML model on real data", level="info")
         try:
             import pandas as pd
 
@@ -584,7 +648,7 @@ class Observer:
             symbols = list(self.watchlist_config.symbols)[:_TRAIN_SYMBOL_SAMPLE]
             x_parts: List = []
             y_parts: List = []
-            candle_series: List = []   # reused for the meta-model below
+            candle_series: List = []  # reused for the meta-model below
             names: Optional[List[str]] = None
             for symbol in symbols:
                 try:
@@ -607,19 +671,26 @@ class Observer:
             dataset = Dataset(
                 X=pd.concat(x_parts, ignore_index=True),
                 y=pd.concat(y_parts, ignore_index=True),
-                feature_names=names)
-            model = PredictiveModel(ModelKind(self.config.ml.model_kind),
-                                    self.config.runtime.random_seed)
+                feature_names=names,
+            )
+            model = PredictiveModel(
+                ModelKind(self.config.ml.model_kind), self.config.runtime.random_seed
+            )
             result = model.fit(dataset)
             _MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
             model.save(_MODEL_PATH)
             self.pipeline.model = model  # the live pipeline picks it up at once
-            _log.info("idle training: %d samples, in-sample accuracy %.3f -> %s",
-                      result.samples, result.accuracy, model.version)
+            _log.info(
+                "idle training: %d samples, in-sample accuracy %.3f -> %s",
+                result.samples,
+                result.accuracy,
+                model.version,
+            )
             self._activity(
                 f"ML model retrained on {result.samples:,} real samples",
-                f"in-sample accuracy {result.accuracy:.0%} "
-                f"({len(x_parts)} stocks)", level="info")
+                f"in-sample accuracy {result.accuracy:.0%} " f"({len(x_parts)} stocks)",
+                level="info",
+            )
 
             # Phase 4 — also retrain the meta-model on triple-barrier labels.
             self._set_now("Training the meta-model (market closed)", "", now)
@@ -630,14 +701,14 @@ class Observer:
                 self._activity(
                     "meta-model retrained",
                     f"{self.meta_model.samples:,} triple-barrier samples",
-                    level="info")
+                    level="info",
+                )
         except Exception as exc:  # noqa: BLE001 - training must never crash a cycle
             _log.warning("idle model training failed: %s", exc)
 
     # -- learning session ----------------------------------------------------
 
-    def _learning_cycle(self, now: datetime, summary: "CycleSummary",
-                        drawdown: float) -> None:
+    def _learning_cycle(self, now: datetime, summary: CycleSummary, drawdown: float) -> None:
         """Per-cycle learning bookkeeping: progress, readiness, day rollover."""
         session = self.learning_session
         session.cycles_completed = self._cycle
@@ -649,17 +720,25 @@ class Observer:
             "predictions_made": self.db.count("predictions"),
             "predictions_evaluated": self.db.count("prediction_outcomes"),
             "fake_trades": self.db.count("paper_trades"),
-            "skipped_trades": sum(1 for h in self.db.latest_symbol_health()
-                                  if h.get("status") != "GOOD PAPER CONDITIONS"),
+            "skipped_trades": sum(
+                1
+                for h in self.db.latest_symbol_health()
+                if h.get("status") != "GOOD PAPER CONDITIONS"
+            ),
         }
         status = "PAPER TRADING" if self._open else "OBSERVING"
         session.save_state(now, counts, status)
 
         readiness = self._compute_readiness(now, drawdown)
         self.db.insert_readiness(
-            ts=now.isoformat(), score=readiness.score, level=readiness.level,
-            capped=int(readiness.capped), day_number=readiness.day_number,
-            breakdown=readiness.breakdown, blockers=readiness.blockers)
+            ts=now.isoformat(),
+            score=readiness.score,
+            level=readiness.level,
+            capped=int(readiness.capped),
+            day_number=readiness.day_number,
+            breakdown=readiness.breakdown,
+            blockers=readiness.blockers,
+        )
 
         # Day rollover: aggregate the previous day, write its report.
         today = now.date().isoformat()
@@ -677,34 +756,41 @@ class Observer:
         accs = [g.accuracy for g in memory.by_condition.values() if g.samples >= 3]
         spread = (max(accs) - min(accs)) if len(accs) >= 2 else 0.0
         errors = self.db.recent_errors(limit=4000)
-        api_failures = sum(1 for e in errors
-                           if "api" in (e.get("context") or "").lower()
-                           or "exchange" in (e.get("context") or "").lower())
-        return compute_readiness(ReadinessInputs(
-            day_number=session.day_number(now),
-            target_days=session.target_days,
-            predictions_evaluated=memory.total,
-            uptime_pct=session.uptime_pct(now),
-            max_drawdown_pct=drawdown * 100.0,
-            overall_accuracy=memory.overall_accuracy,
-            false_confidence_count=len(memory.false_confidence_warnings()),
-            regimes_observed=len([r for r in regimes if r]),
-            regime_accuracy_spread=spread,
-            api_failures=api_failures))
+        api_failures = sum(
+            1
+            for e in errors
+            if "api" in (e.get("context") or "").lower()
+            or "exchange" in (e.get("context") or "").lower()
+        )
+        return compute_readiness(
+            ReadinessInputs(
+                day_number=session.day_number(now),
+                target_days=session.target_days,
+                predictions_evaluated=memory.total,
+                uptime_pct=session.uptime_pct(now),
+                max_drawdown_pct=drawdown * 100.0,
+                overall_accuracy=memory.overall_accuracy,
+                false_confidence_count=len(memory.false_confidence_warnings()),
+                regimes_observed=len([r for r in regimes if r]),
+                regime_accuracy_spread=spread,
+                api_failures=api_failures,
+            )
+        )
 
     def _day_rollover(self, day_date: str, now: datetime) -> None:
         """Aggregate a completed day and write its daily report."""
         session = self.learning_session
         day_number = max(1, session.day_number(now) - 1)
         try:
-            metric = roll_up_day(self.db, day_date, day_number,
-                                 int(86_400 / session.interval_seconds))
+            metric = roll_up_day(
+                self.db, day_date, day_number, int(86_400 / session.interval_seconds)
+            )
             self.db.upsert_daily_metric(day_date, **metric)
             write_daily_report(self.db, day_date)
-            self._activity(f"daily report generated for {day_date}",
-                           f"day {day_number}", level="info")
-            _log.info("day %d rolled up (%s): %s", day_number, day_date,
-                      metric.get("status"))
+            self._activity(
+                f"daily report generated for {day_date}", f"day {day_number}", level="info"
+            )
+            _log.info("day %d rolled up (%s): %s", day_number, day_date, metric.get("status"))
             # Ported from daytrade QA-HIGH-3: prune old high-volume rows
             # + WAL checkpoint. Keeps the DB from growing forever.
             try:
@@ -724,26 +810,26 @@ class Observer:
         except Exception:  # noqa: BLE001 - activity logging must never crash
             pass
 
-    def _set_now(self, step: str, symbol: str, now: datetime,
-                 done: bool = False) -> None:
+    def _set_now(self, step: str, symbol: str, now: datetime, done: bool = False) -> None:
         """Write the live 'what is it doing right now' state to data/now.json.
 
         Ported from daytrade QA-HIGH-4: atomic write via tempfile +
         os.replace so a dashboard reader never sees a truncated JSON.
         """
         try:
-            next_cycle = (now + timedelta(seconds=self._interval)).isoformat() \
-                if done else None
+            next_cycle = (now + timedelta(seconds=self._interval)).isoformat() if done else None
             _NOW_PATH.parent.mkdir(parents=True, exist_ok=True)
-            payload = json.dumps({
-                "cycle": self._cycle,
-                "started_at": now.isoformat(),
-                "current_step": step,
-                "current_symbol": symbol,
-                "next_cycle_at": next_cycle,
-                "errors_this_cycle": getattr(self, "_errors_this_cycle", 0),
-                "steps": CYCLE_STEPS,
-            })
+            payload = json.dumps(
+                {
+                    "cycle": self._cycle,
+                    "started_at": now.isoformat(),
+                    "current_step": step,
+                    "current_symbol": symbol,
+                    "next_cycle_at": next_cycle,
+                    "errors_this_cycle": getattr(self, "_errors_this_cycle", 0),
+                    "steps": CYCLE_STEPS,
+                }
+            )
             tmp = _NOW_PATH.with_suffix(".json.tmp")
             tmp.write_text(payload, encoding="utf-8")
             os.replace(tmp, _NOW_PATH)
@@ -752,9 +838,17 @@ class Observer:
 
     # -- paper trading -------------------------------------------------------
 
-    def _maybe_open_position(self, symbol: str, decision, screening, price: float,
-                             liquidity_notional: float, equity: float,
-                             now: datetime, prediction_id: int) -> None:
+    def _maybe_open_position(
+        self,
+        symbol: str,
+        decision,
+        screening,
+        price: float,
+        liquidity_notional: float,
+        equity: float,
+        now: datetime,
+        prediction_id: int,
+    ) -> None:
         if symbol in self._open or not screening.approved:
             return
         if decision.action is not Action.BUY or decision.kill_switch_active:
@@ -762,26 +856,38 @@ class Observer:
         if not (decision.entry and decision.stop and decision.target):
             return
         permission = self._risk.evaluate_entry(
-            equity, open_positions=len(self._open), bar_index=self._cycle)
+            equity, open_positions=len(self._open), bar_index=self._cycle
+        )
         if not permission.allowed:
             return
-        sizing = position_size(equity, decision.entry, decision.stop,
-                               self.config.risk)
+        sizing = position_size(equity, decision.entry, decision.stop, self.config.risk)
         if not sizing.is_tradeable:
             return
         trade_id = self.db.insert_paper_trade(
-            symbol=symbol, side=Side.BUY.value, quantity=sizing.quantity,
-            entry_price=decision.entry, stop=decision.stop,
-            target=decision.target, fees=0.0, slippage=0.0, pnl=0.0)
+            symbol=symbol,
+            side=Side.BUY.value,
+            quantity=sizing.quantity,
+            entry_price=decision.entry,
+            stop=decision.stop,
+            target=decision.target,
+            fees=0.0,
+            slippage=0.0,
+            pnl=0.0,
+        )
         self._open[symbol] = {
-            "trade_id": trade_id, "qty": sizing.quantity,
-            "entry": decision.entry, "stop": decision.stop,
+            "trade_id": trade_id,
+            "qty": sizing.quantity,
+            "entry": decision.entry,
+            "stop": decision.stop,
             "target": decision.target,
         }
-        self._activity(f"paper trade opened: {symbol}",
-                       f"qty {sizing.quantity:.4f} @ {decision.entry:.4f} (sim)")
-        _log.info("paper-opened %s qty=%.6f entry=%.4f (sim)",
-                  symbol, sizing.quantity, decision.entry)
+        self._activity(
+            f"paper trade opened: {symbol}",
+            f"qty {sizing.quantity:.4f} @ {decision.entry:.4f} (sim)",
+        )
+        _log.info(
+            "paper-opened %s qty=%.6f entry=%.4f (sim)", symbol, sizing.quantity, decision.entry
+        )
 
     def _manage_positions(self, now: datetime) -> int:
         """Close any open paper position whose stop or target was reached.
@@ -795,8 +901,9 @@ class Observer:
             try:
                 price = self.feed.price_at(symbol, now)
             except Exception as exc:  # noqa: BLE001 — fail-soft per-symbol
-                _log.warning("price_at(%s) failed; skipping management "
-                             "this cycle: %s", symbol, exc)
+                _log.warning(
+                    "price_at(%s) failed; skipping management " "this cycle: %s", symbol, exc
+                )
                 continue
             exit_price: Optional[float] = None
             if price <= pos["stop"]:
@@ -807,17 +914,16 @@ class Observer:
                 continue
             qty = pos["qty"]
             gross = (exit_price - pos["entry"]) * qty
-            fee = (exit_price + pos["entry"]) * qty * \
-                self.config.risk.fee_bps / 10_000.0
+            fee = (exit_price + pos["entry"]) * qty * self.config.risk.fee_bps / 10_000.0
             pnl = gross - fee
             slippage = exit_price * 0.0004 * qty
-            self.db.close_paper_trade(pos["trade_id"], exit_price=exit_price,
-                                      pnl=pnl, fees=fee, slippage=slippage)
+            self.db.close_paper_trade(
+                pos["trade_id"], exit_price=exit_price, pnl=pnl, fees=fee, slippage=slippage
+            )
             self._risk.register_trade_close(pnl, self._cycle)
             del self._open[symbol]
             closed += 1
-            _log.info("paper-closed %s exit=%.4f pnl=%.2f (sim)",
-                      symbol, exit_price, pnl)
+            _log.info("paper-closed %s exit=%.4f pnl=%.2f (sim)", symbol, exit_price, pnl)
         return closed
 
     def _equity(self, now: datetime) -> float:
@@ -828,16 +934,18 @@ class Observer:
         try:
             realized = self.db.total_realised_pnl()
         except AttributeError:
-            realized = sum(t["pnl"] or 0.0
-                           for t in self.db.closed_paper_trades())
+            realized = sum(t["pnl"] or 0.0 for t in self.db.closed_paper_trades())
         unrealized = 0.0
         for symbol, pos in self._open.items():
             # Ported from daytrade QA-CRIT-1: fail-soft on price fetch
             try:
                 price = self.feed.price_at(symbol, now)
             except Exception as exc:  # noqa: BLE001
-                _log.warning("price_at(%s) failed in equity calc; using "
-                             "entry as fallback: %s", symbol, exc)
+                _log.warning(
+                    "price_at(%s) failed in equity calc; using " "entry as fallback: %s",
+                    symbol,
+                    exc,
+                )
                 price = pos["entry"]
             unrealized += (price - pos["entry"]) * pos["qty"]
         return self._starting_cash + realized + unrealized
@@ -848,8 +956,7 @@ class Observer:
     def _symbol_status(safety, screening, decision) -> str:
         """Map a symbol's state to a dashboard status label."""
         if not screening.approved:
-            if any("liquidity" in r or "orderbook" in r
-                   for r in screening.rejections):
+            if any("liquidity" in r or "orderbook" in r for r in screening.rejections):
                 return "TOO ILLIQUID"
             return "WATCH ONLY"
         if safety.condition == "PANIC":
@@ -867,8 +974,7 @@ class Observer:
     def _write_cycle_report(self, summary: CycleSummary) -> None:
         """Write the cycle summary to reports/observer/ (latest + run log)."""
         try:
-            (_OBSERVER_REPORTS / "latest.json").write_text(
-                json.dumps(asdict(summary), indent=2))
+            (_OBSERVER_REPORTS / "latest.json").write_text(json.dumps(asdict(summary), indent=2))
             run_log = _OBSERVER_REPORTS / f"run_{self._run_id}.jsonl"
             with run_log.open("a", encoding="utf-8") as fh:
                 fh.write(json.dumps(asdict(summary)) + "\n")
@@ -900,9 +1006,9 @@ class Observer:
         consecutive_failures = 0
         try:
             while not self._stop:
-                if (self.learning_session is not None
-                        and self.learning_session.is_complete(
-                            datetime.now(timezone.utc))):
+                if self.learning_session is not None and self.learning_session.is_complete(
+                    datetime.now(timezone.utc)
+                ):
                     _log.info("learning window complete — stopping observer")
                     self._learning_complete = True
                     break
@@ -912,17 +1018,21 @@ class Observer:
                 except Exception as exc:  # noqa: BLE001 - crash recovery
                     consecutive_failures += 1
                     self.db.insert_error("cycle", repr(exc))
-                    _log.exception("cycle failed (%d in a row)",
-                                   consecutive_failures)
-                    self.alerts.emit(Alert(
-                        LEVEL_CRITICAL, "crash",
-                        f"observer cycle crashed: {exc!r}",
-                        datetime.now(timezone.utc)))
+                    _log.exception("cycle failed (%d in a row)", consecutive_failures)
+                    self.alerts.emit(
+                        Alert(
+                            LEVEL_CRITICAL,
+                            "crash",
+                            f"observer cycle crashed: {exc!r}",
+                            datetime.now(timezone.utc),
+                        )
+                    )
                     if consecutive_failures >= self._ABORT_THRESHOLD:
                         _log.error(
                             "%d consecutive cycle failures — aborting; "
                             "watchdog can restart cleanly",
-                            consecutive_failures)
+                            consecutive_failures,
+                        )
                         self._stop = True
                         break
                 extra_sleep = 0.0
@@ -932,22 +1042,28 @@ class Observer:
                         self._BACKOFF_MAX_SECONDS,
                         interval * (2 ** min(n, 10)),
                     )
-                    _log.warning("backoff: extra %.0f s sleep "
-                                 "(consecutive failures = %d)",
-                                 extra_sleep, consecutive_failures)
+                    _log.warning(
+                        "backoff: extra %.0f s sleep " "(consecutive failures = %d)",
+                        extra_sleep,
+                        consecutive_failures,
+                    )
                 slept = 0.0
                 total = interval + extra_sleep
                 while slept < total and not self._stop:
                     time.sleep(min(1.0, total - slept))
                     slept += 1.0
         finally:
-            final = "completed" if getattr(self, "_learning_complete", False) \
+            final = (
+                "completed"
+                if getattr(self, "_learning_complete", False)
                 else ("stopped" if self._stop else "crashed")
-            if (self.learning_session is not None
-                    and self.learning_session.session_id is not None):
+            )
+            if self.learning_session is not None and self.learning_session.session_id is not None:
                 self.db.update_learning_session(
-                    self.learning_session.session_id, self._cycle,
-                    status="completed" if final == "completed" else "stopped")
+                    self.learning_session.session_id,
+                    self._cycle,
+                    status="completed" if final == "completed" else "stopped",
+                )
             self.stop(final)
             self.db.close()
 
@@ -955,6 +1071,7 @@ class Observer:
         def _handler(signum, _frame):
             _log.info("signal %d received — shutting down gracefully", signum)
             self._stop = True
+
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
                 signal.signal(sig, _handler)

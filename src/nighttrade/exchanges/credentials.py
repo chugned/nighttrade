@@ -65,10 +65,15 @@ class ApiKeyPermissions:
         return not (self.can_trade or self.can_fund)
 
     def describe(self) -> str:
-        scopes = [name for name, on in (
-            ("read", self.can_read), ("trade", self.can_trade),
-            ("fund", self.can_fund),
-        ) if on]
+        scopes = [
+            name
+            for name, on in (
+                ("read", self.can_read),
+                ("trade", self.can_trade),
+                ("fund", self.can_fund),
+            )
+            if on
+        ]
         account = "paper" if self.is_paper else "LIVE"
         return f"{account}: " + (", ".join(scopes) or "none")
 
@@ -110,9 +115,7 @@ def load_sandbox_credentials(broker: str) -> Optional[ApiCredentials]:
     if not api_key and not api_secret:
         return None
     if not api_key or not api_secret:
-        raise MissingCredentialsError(
-            f"{broker}: both {key_var} and {secret_var} must be set"
-        )
+        raise MissingCredentialsError(f"{broker}: both {key_var} and {secret_var} must be set")
     return ApiCredentials(broker=broker, api_key=api_key, api_secret=api_secret)
 
 

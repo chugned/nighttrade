@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -27,8 +27,7 @@ _STATIC = Path(__file__).resolve().parent / "static"
 
 def create_app(db_path: Path | str = DEFAULT_DB_PATH) -> FastAPI:
     """Build the dashboard FastAPI application bound to ``db_path``."""
-    app = FastAPI(title="nighttrade — Market Safety Observatory",
-                  docs_url="/api/docs")
+    app = FastAPI(title="nighttrade — Market Safety Observatory", docs_url="/api/docs")
 
     def data() -> DashboardData:
         return DashboardData(db_path)
@@ -140,9 +139,15 @@ def create_app(db_path: Path | str = DEFAULT_DB_PATH) -> FastAPI:
 
     @app.get("/api/health")
     def health() -> JSONResponse:
-        return JSONResponse({"ok": True, "real_trading": False,
-                             "paper_only": True, "wallets": False,
-                             "bank_transfers": False})
+        return JSONResponse(
+            {
+                "ok": True,
+                "real_trading": False,
+                "paper_only": True,
+                "wallets": False,
+                "bank_transfers": False,
+            }
+        )
 
     async def _ws_loop(socket: WebSocket) -> None:
         await socket.accept()

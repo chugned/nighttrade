@@ -31,15 +31,11 @@ class SafetyConfig(_Section):
     paper_trading: bool = True
 
     @model_validator(mode="after")
-    def _enforce_paper_only(self) -> "SafetyConfig":
+    def _enforce_paper_only(self) -> SafetyConfig:
         if self.live_trading_enabled:
-            raise ValueError(
-                "live_trading_enabled must be false — real trading is disabled."
-            )
+            raise ValueError("live_trading_enabled must be false — real trading is disabled.")
         if self.allow_real_orders:
-            raise ValueError(
-                "allow_real_orders must be false — real trading is disabled."
-            )
+            raise ValueError("allow_real_orders must be false — real trading is disabled.")
         if not self.paper_trading:
             raise ValueError("paper_trading must be true — this platform is paper-only.")
         return self
@@ -77,11 +73,13 @@ class ExchangeConfig(_Section):
 class ConsensusConfig(_Section):
     min_sources: int = Field(default=1, ge=1)
     outlier_z_threshold: float = Field(
-        default=3.0, gt=0,
+        default=3.0,
+        gt=0,
         description="Source prices beyond this many MADs from the median are dropped.",
     )
     max_dispersion: float = Field(
-        default=0.05, gt=0,
+        default=0.05,
+        gt=0,
         description="If accepted-source dispersion exceeds this, mark degraded.",
     )
 
@@ -96,7 +94,7 @@ class IndicatorConfig(_Section):
     trend_window: int = Field(default=20, ge=2)
 
     @model_validator(mode="after")
-    def _fast_slow(self) -> "IndicatorConfig":
+    def _fast_slow(self) -> IndicatorConfig:
         if self.ema_fast >= self.ema_slow:
             raise ValueError("ema_fast must be < ema_slow")
         return self
@@ -111,36 +109,44 @@ class MicrostructureConfig(_Section):
     """
 
     flow_window: int = Field(
-        default=20, ge=2,
+        default=20,
+        ge=2,
         description="Bars used to estimate signed intraday order-flow imbalance.",
     )
     imbalance_strong: float = Field(default=0.30, gt=0, le=1)
     wide_spread_bps: float = Field(
-        default=8.0, gt=0,
+        default=8.0,
+        gt=0,
         description="Effective spread proxy above this counts as wide.",
     )
     rvol_window: int = Field(
-        default=30, ge=2,
+        default=30,
+        ge=2,
         description="Bars averaged for the relative-volume (RVOL) baseline.",
     )
     low_rvol_threshold: float = Field(
-        default=0.40, gt=0,
+        default=0.40,
+        gt=0,
         description="RVOL below this flags thin participation / low liquidity.",
     )
     vwap_window: int = Field(
-        default=60, ge=2,
+        default=60,
+        ge=2,
         description="Bars used for the rolling session VWAP.",
     )
     vwap_stretch_strong: float = Field(
-        default=0.015, gt=0,
+        default=0.015,
+        gt=0,
         description="|price-VWAP|/VWAP beyond this counts as a stretched tape.",
     )
     gap_strong_pct: float = Field(
-        default=0.012, gt=0,
+        default=0.012,
+        gt=0,
         description="Session gap (open vs prior close) beyond this is notable.",
     )
     swing_window: int = Field(
-        default=30, ge=2,
+        default=30,
+        ge=2,
         description="Bars scanned for swing-high/low support & resistance.",
     )
 
@@ -154,7 +160,8 @@ class FeatureConfig(_Section):
 class LabelConfig(_Section):
     horizon: int = Field(default=5, ge=1, description="Bars ahead for the label.")
     breakout_threshold: float = Field(
-        default=0.004, gt=0,
+        default=0.004,
+        gt=0,
         description="Forward return magnitude that counts as a directional move.",
     )
 
@@ -172,11 +179,14 @@ class WalkForwardConfig(_Section):
     train_window: int = Field(default=400, ge=50)
     test_window: int = Field(default=100, ge=20)
     overfit_gap_warn: float = Field(
-        default=0.15, gt=0,
+        default=0.15,
+        gt=0,
         description="train-test accuracy gap above this flags overfitting.",
     )
     suspicious_accuracy: float = Field(
-        default=0.85, gt=0.5, le=1.0,
+        default=0.85,
+        gt=0.5,
+        le=1.0,
         description="Test accuracy above this flags likely leakage.",
     )
 
@@ -201,7 +211,7 @@ class FusionWeights(_Section):
     ml: float = Field(default=0.20, ge=0)
 
     @model_validator(mode="after")
-    def _positive_sum(self) -> "FusionWeights":
+    def _positive_sum(self) -> FusionWeights:
         if self.technical + self.microstructure + self.macro + self.ml <= 0:
             raise ValueError("fusion weights must sum to a positive number")
         return self
@@ -210,35 +220,44 @@ class FusionWeights(_Section):
 class FusionConfig(_Section):
     weights: FusionWeights = Field(default_factory=FusionWeights)
     action_threshold: float = Field(
-        default=0.15, gt=0, lt=1,
+        default=0.15,
+        gt=0,
+        lt=1,
         description="Abs fused score required to act (else HOLD).",
     )
     min_confidence: float = Field(
-        default=0.35, ge=0, le=1,
+        default=0.35,
+        ge=0,
+        le=1,
         description="Confidence below this downgrades the action to HOLD.",
     )
     # Entry/stop/target are placed in units of a volatility unit U, where
     # U = reference_price * clip(ATR/price, min_vol_fraction, max_vol_fraction).
     entry_offset_vol_mult: float = Field(
-        default=1.0, ge=0,
+        default=1.0,
+        ge=0,
         description="Entry is offset this many volatility units toward a better fill.",
     )
-    stop_vol_mult: float = Field(default=1.0, gt=0,
-                                 description="Stop distance from entry, in vol units.")
-    target_vol_mult: float = Field(default=5.0, gt=0,
-                                   description="Target distance from entry, in vol units.")
+    stop_vol_mult: float = Field(
+        default=1.0, gt=0, description="Stop distance from entry, in vol units."
+    )
+    target_vol_mult: float = Field(
+        default=5.0, gt=0, description="Target distance from entry, in vol units."
+    )
     min_volatility_fraction: float = Field(
-        default=0.002, gt=0,
+        default=0.002,
+        gt=0,
         description="Volatility-unit floor as a fraction of price — keeps stops "
-                    "from being placed unrealistically tight in calm markets.",
+        "from being placed unrealistically tight in calm markets.",
     )
     max_volatility_fraction: float = Field(
-        default=0.05, gt=0,
+        default=0.05,
+        gt=0,
         description="Volatility-unit cap as a fraction of price.",
     )
 
     @model_validator(mode="after")
-    def _vol_bounds(self) -> "FusionConfig":
+    def _vol_bounds(self) -> FusionConfig:
         if self.min_volatility_fraction >= self.max_volatility_fraction:
             raise ValueError("min_volatility_fraction must be < max_volatility_fraction")
         return self
@@ -263,66 +282,86 @@ class GatesConfig(_Section):
     """
 
     regime_min_samples: int = Field(
-        default=20, ge=1,
-        description="Evaluated predictions a regime needs before the regime "
-                    "gate will block it.")
+        default=20,
+        ge=1,
+        description="Evaluated predictions a regime needs before the regime " "gate will block it.",
+    )
     calibration_min_samples: int = Field(
-        default=40, ge=1,
+        default=40,
+        ge=1,
         description="Evaluated predictions needed before the isotonic "
-                    "confidence calibration is fitted and enforced.")
+        "confidence calibration is fitted and enforced.",
+    )
     calibration_floor: float = Field(
-        default=0.50, ge=0.0, le=1.0,
-        description="Minimum calibrated win probability for a live entry.")
+        default=0.50,
+        ge=0.0,
+        le=1.0,
+        description="Minimum calibrated win probability for a live entry.",
+    )
     meta_min_probability: float = Field(
-        default=0.20, ge=0.0, le=1.0,
+        default=0.20,
+        ge=0.0,
+        le=1.0,
         description="Minimum meta-model P(target before stop) for a live "
-                    "entry. Must sit ABOVE the triple-barrier base rate (which "
-                    "the 5:1 geometry puts near ~12%), not at a naive 50%+.")
+        "entry. Must sit ABOVE the triple-barrier base rate (which "
+        "the 5:1 geometry puts near ~12%), not at a naive 50%+.",
+    )
 
 
 class RiskConfig(_Section):
     fee_bps: float = Field(default=10.0, ge=0, description="Per-side fee, bps.")
     base_slippage_bps: float = Field(default=2.0, ge=0)
     impact_slippage_bps: float = Field(
-        default=8.0, ge=0,
+        default=8.0,
+        ge=0,
         description="Extra slippage scaled by order size vs available liquidity.",
     )
     latency_ms: float = Field(default=250.0, ge=0)
     risk_per_trade: float = Field(
-        default=0.01, gt=0, le=0.25,
+        default=0.01,
+        gt=0,
+        le=0.25,
         description="Fraction of equity risked between entry and stop.",
     )
     max_position_pct: float = Field(
-        default=0.25, gt=0, le=1.0,
-        description="Max notional of a single per-stock position, as a fraction "
-                    "of equity.",
+        default=0.25,
+        gt=0,
+        le=1.0,
+        description="Max notional of a single per-stock position, as a fraction " "of equity.",
     )
     max_daily_loss_pct: float = Field(default=0.05, gt=0, le=1.0)
     max_weekly_loss_pct: float = Field(
-        default=0.12, gt=0, le=1.0,
+        default=0.12,
+        gt=0,
+        le=1.0,
         description="Rolling 7-day loss limit; blocks new entries once hit.",
     )
     max_open_positions: int = Field(
-        default=3, ge=1,
+        default=3,
+        ge=1,
         description="Maximum number of simultaneously open positions.",
     )
     loss_cooldown_bars: int = Field(
-        default=20, ge=0,
+        default=20,
+        ge=0,
         description="Bars to wait after a losing trade before a new entry.",
     )
     time_stop_bars: int = Field(
-        default=20, ge=0,
+        default=20,
+        ge=0,
         description="Triple-barrier time stop: force-close a position after "
-                    "this many bars even if neither stop nor target is hit. "
-                    "0 disables it.",
+        "this many bars even if neither stop nor target is hit. "
+        "0 disables it.",
     )
     partial_fill_liquidity_frac: float = Field(
-        default=0.25, gt=0, le=1.0,
+        default=0.25,
+        gt=0,
+        le=1.0,
         description="Max fraction of top-of-book liquidity one order may consume.",
     )
 
     @model_validator(mode="after")
-    def _loss_limits_ordered(self) -> "RiskConfig":
+    def _loss_limits_ordered(self) -> RiskConfig:
         if self.max_weekly_loss_pct < self.max_daily_loss_pct:
             raise ValueError("max_weekly_loss_pct must be >= max_daily_loss_pct")
         return self
@@ -336,7 +375,8 @@ class PaperConfig(_Section):
 class BacktestConfig(_Section):
     warmup_bars: int = Field(default=50, ge=0)
     sharpe_warn_threshold: float = Field(
-        default=4.0, gt=0,
+        default=4.0,
+        gt=0,
         description="A backtest Sharpe-like ratio above this is flagged unrealistic.",
     )
 
@@ -349,21 +389,25 @@ class WatchlistConfig(_Section):
         description="Tradeable universe — extend with any liquid US tickers.",
     )
     min_24h_volume_usd: float = Field(
-        default=20_000_000.0, gt=0,
+        default=20_000_000.0,
+        gt=0,
         description="Reject stocks below this average daily dollar volume.",
     )
     max_spread_bps: float = Field(
-        default=20.0, gt=0,
+        default=20.0,
+        gt=0,
         description="Reject stocks whose effective (proxy) spread exceeds this.",
     )
     min_orderbook_notional_usd: float = Field(
-        default=100_000.0, gt=0,
+        default=100_000.0,
+        gt=0,
         description="Reject stocks with too little resting top-of-book size.",
     )
     pump_dump_max_1h_move_pct: float = Field(
-        default=0.20, gt=0,
+        default=0.20,
+        gt=0,
         description="Reject stocks that moved more than this intraday "
-                    "(suspected halt-bound news spike / low-float squeeze).",
+        "(suspected halt-bound news spike / low-float squeeze).",
     )
 
     @field_validator("symbols")
@@ -385,9 +429,8 @@ class CrossSectionWeights(_Section):
     ml: float = Field(default=0.10, ge=0)
 
     @model_validator(mode="after")
-    def _positive_sum(self) -> "CrossSectionWeights":
-        if (self.momentum + self.trend + self.reversion
-                + self.low_vol + self.ml) <= 0:
+    def _positive_sum(self) -> CrossSectionWeights:
+        if (self.momentum + self.trend + self.reversion + self.low_vol + self.ml) <= 0:
             raise ValueError("cross-section weights must sum to a positive number")
         return self
 
@@ -401,30 +444,39 @@ class CrossSectionConfig(_Section):
     """
 
     momentum_lookback: int = Field(
-        default=60, ge=2,
+        default=60,
+        ge=2,
         description="Bars over which trailing-return momentum is measured.",
     )
     trend_window: int = Field(
-        default=60, ge=3,
+        default=60,
+        ge=3,
         description="Bars used for the trend-quality (signed R²) factor.",
     )
     reversion_rsi_period: int = Field(default=14, ge=2)
     volatility_window: int = Field(default=30, ge=2)
     weights: CrossSectionWeights = Field(default_factory=CrossSectionWeights)
     long_fraction: float = Field(
-        default=0.10, gt=0, le=0.5,
+        default=0.10,
+        gt=0,
+        le=0.5,
         description="Top fraction of the ranked universe placed in the long basket.",
     )
     short_fraction: float = Field(
-        default=0.10, ge=0, le=0.5,
+        default=0.10,
+        ge=0,
+        le=0.5,
         description="Bottom fraction placed in the short/avoid basket.",
     )
     winsorize_limit: float = Field(
-        default=0.05, ge=0, lt=0.5,
+        default=0.05,
+        ge=0,
+        lt=0.5,
         description="Fraction clipped from each tail before z-scoring a factor.",
     )
     min_dollar_volume: float = Field(
-        default=10_000_000.0, ge=0,
+        default=10_000_000.0,
+        ge=0,
         description="Stocks below this daily dollar volume are excluded from ranking.",
     )
 
@@ -453,8 +505,7 @@ class SandboxConfig(_Section):
 
     enabled: bool = Field(
         default=False,
-        description="Opt-in: enable broker paper-account execution (still no "
-                    "real money).",
+        description="Opt-in: enable broker paper-account execution (still no " "real money).",
     )
     broker: str = Field(
         default="alpaca",
@@ -478,12 +529,11 @@ class SandboxConfig(_Section):
         return v
 
     @model_validator(mode="after")
-    def _enforce_sandbox_safety(self) -> "SandboxConfig":
+    def _enforce_sandbox_safety(self) -> SandboxConfig:
         # This guard cannot be turned off — a live account is never allowed.
         if not self.reject_live_keys:
             raise ValueError(
-                "reject_live_keys must be true — live brokerage accounts are "
-                "never permitted."
+                "reject_live_keys must be true — live brokerage accounts are " "never permitted."
             )
         return self
 

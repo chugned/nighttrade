@@ -28,8 +28,9 @@ from ..runtime import get_logger
 _log = get_logger("validation.walkforward")
 
 
-def _resolve_windows(n: int, train_window: int, test_window: int,
-                     n_folds: int, purge: int) -> "tuple[int, int]":
+def _resolve_windows(
+    n: int, train_window: int, test_window: int, n_folds: int, purge: int
+) -> tuple[int, int]:
     """Shrink the configured windows if the dataset cannot accommodate them."""
     needed = train_window + purge + test_window * n_folds
     if needed <= n:
@@ -38,9 +39,7 @@ def _resolve_windows(n: int, train_window: int, test_window: int,
     scale = n / float(needed)
     tw = max(40, int(train_window * scale))
     sw = max(15, int(test_window * scale))
-    _log.warning(
-        "walk-forward windows shrunk to fit %d samples: train=%d test=%d", n, tw, sw
-    )
+    _log.warning("walk-forward windows shrunk to fit %d samples: train=%d test=%d", n, tw, sw)
     return tw, sw
 
 
@@ -75,7 +74,7 @@ def walk_forward_validate(
 
     while fold_id < wf.n_folds and start + train_window + purge + test_window <= n:
         tr_lo, tr_hi = start, start + train_window
-        te_lo = tr_hi + purge          # purge gap — no label overlap leaks
+        te_lo = tr_hi + purge  # purge gap — no label overlap leaks
         te_hi = te_lo + test_window
 
         X_tr, y_tr = X[tr_lo:tr_hi], y[tr_lo:tr_hi]
@@ -99,22 +98,32 @@ def walk_forward_validate(
         except (ValueError, IndexError):
             test_auc = 0.5
 
-        folds.append(WalkForwardFold(
-            fold=fold_id,
-            train_start=index[tr_lo], train_end=index[tr_hi - 1],
-            test_start=index[te_lo], test_end=index[te_hi - 1],
-            train_samples=len(y_tr), test_samples=len(y_te),
-            train_accuracy=train_acc, test_accuracy=test_acc, test_auc=test_auc,
-        ))
+        folds.append(
+            WalkForwardFold(
+                fold=fold_id,
+                train_start=index[tr_lo],
+                train_end=index[tr_hi - 1],
+                test_start=index[te_lo],
+                test_end=index[te_hi - 1],
+                train_samples=len(y_tr),
+                test_samples=len(y_te),
+                train_accuracy=train_acc,
+                test_accuracy=test_acc,
+                test_auc=test_auc,
+            )
+        )
         start += test_window
         fold_id += 1
 
     if not folds:
         warnings.append("no valid walk-forward folds — dataset too small")
         return WalkForwardReport(
-            model_kind=config.ml.model_kind, folds=[],
-            mean_test_accuracy=0.0, mean_overfit_gap=0.0,
-            leakage_suspected=False, warnings=warnings,
+            model_kind=config.ml.model_kind,
+            folds=[],
+            mean_test_accuracy=0.0,
+            mean_overfit_gap=0.0,
+            leakage_suspected=False,
+            warnings=warnings,
         )
 
     mean_test_acc = float(np.mean([f.test_accuracy for f in folds]))

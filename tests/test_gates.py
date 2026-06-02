@@ -24,8 +24,7 @@ def test_break_even_win_rate():
 
 
 def _memory(condition: str, samples: int, correct: int) -> PredictionMemory:
-    group = GroupAccuracy(label=condition, samples=samples, correct=correct,
-                          mean_confidence=0.6)
+    group = GroupAccuracy(label=condition, samples=samples, correct=correct, mean_confidence=0.6)
     return PredictionMemory(by_condition={condition: group})
 
 
@@ -72,6 +71,7 @@ def test_regime_gate_reward_risk_changes_break_even():
 
 # --- Phase 3: confidence calibration gate ----------------------------------
 
+
 def _overconfident_history(n_per: int = 60):
     """Stated confidence sits monotonically above realized accuracy."""
     conf: list = []
@@ -97,8 +97,8 @@ def test_calibrator_shrinks_overconfidence():
     cal = ConfidenceCalibrator(min_samples=40)
     cal.fit(*_overconfident_history())
     assert cal.is_fitted
-    assert cal.calibrate(0.9) < 0.9                       # 90% stated, ~60% true
-    assert cal.calibrate(0.9) > cal.calibrate(0.6)        # still monotone
+    assert cal.calibrate(0.9) < 0.9  # 90% stated, ~60% true
+    assert cal.calibrate(0.9) > cal.calibrate(0.6)  # still monotone
 
 
 def test_calibration_gate_blocks_below_floor():
@@ -107,7 +107,7 @@ def test_calibration_gate_blocks_below_floor():
     cal.fit(*_overconfident_history())
     gate = CalibrationGate(cal, floor=0.55)
     assert not gate.evaluate(0.6).allowed  # calibrates to ~0.40 — blocked
-    assert gate.evaluate(0.9).allowed      # calibrates to ~0.60 — allowed
+    assert gate.evaluate(0.9).allowed  # calibrates to ~0.60 — allowed
 
 
 def test_calibration_gate_inactive_until_fitted():
@@ -120,14 +120,16 @@ def test_calibration_gate_inactive_until_fitted():
 
 # --- Phase 4: meta-labelling -----------------------------------------------
 
+
 def test_triple_barrier_labels_are_binary(config):
     """Every resolved triple-barrier label is 0 or 1; trailing bars are NaN."""
     from nighttrade.exchanges import generate_random_walk
     from nighttrade.indicators.frame import ohlcv_to_frame
     from nighttrade.labels import triple_barrier_labels
 
-    candles = generate_random_walk("AAPL", n_bars=300, start_price=200.0,
-                                   drift=0.001, volatility=0.005, seed=4)
+    candles = generate_random_walk(
+        "AAPL", n_bars=300, start_price=200.0, drift=0.001, volatility=0.005, seed=4
+    )
     labels = triple_barrier_labels(ohlcv_to_frame(candles), config)
     resolved = labels.dropna()
     assert len(resolved) > 50
@@ -139,8 +141,9 @@ def test_meta_dataset_and_model(config):
     from nighttrade.exchanges import generate_random_walk
     from nighttrade.gates import MetaModel, build_meta_dataset
 
-    candles = generate_random_walk("AAPL", n_bars=600, start_price=200.0,
-                                   drift=0.0006, volatility=0.006, seed=5)
+    candles = generate_random_walk(
+        "AAPL", n_bars=600, start_price=200.0, drift=0.0006, volatility=0.006, seed=5
+    )
     X, y, names = build_meta_dataset(candles, config)
     assert len(X) == len(y) > 50 and len(names) > 0
     model = MetaModel(seed=1).fit(X, y)
@@ -165,8 +168,9 @@ def test_meta_model_save_load_round_trip(config, tmp_path):
     from nighttrade.exchanges import generate_random_walk
     from nighttrade.gates import MetaModel, build_meta_dataset
 
-    candles = generate_random_walk("AAPL", n_bars=600, start_price=200.0,
-                                   drift=0.0006, volatility=0.006, seed=5)
+    candles = generate_random_walk(
+        "AAPL", n_bars=600, start_price=200.0, drift=0.0006, volatility=0.006, seed=5
+    )
     X, y, _ = build_meta_dataset(candles, config)
     model = MetaModel(seed=1).fit(X, y)
     if not model.is_trained:

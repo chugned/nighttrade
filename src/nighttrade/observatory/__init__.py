@@ -11,13 +11,13 @@ from .alerts import Alert, AlertManager, build_condition_alerts
 from .daily_report import build_daily_report_markdown, write_daily_report
 from .database import DEFAULT_DB_PATH, ObservatoryDB
 from .feed import LiveMockFeed, known_symbols, profile_for
-from .live_feed import YFinanceFeed
 from .learning import (
     LEARNING_PHASES,
     LearningSession,
     load_learning_state,
     phase_for,
 )
+from .live_feed import YFinanceFeed
 from .metrics import (
     confidence_calibration,
     learning_metrics,

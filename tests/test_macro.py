@@ -15,15 +15,13 @@ def test_explicit_scenario_risk_on(uptrend_candles):
 
 
 def test_explicit_scenario_credit_crisis(uptrend_candles):
-    sig = MockMacroAnalyzer().analyze("AAPL", uptrend_candles,
-                                      scenario="credit_crisis")
+    sig = MockMacroAnalyzer().analyze("AAPL", uptrend_candles, scenario="credit_crisis")
     assert sig.bias is Bias.BEARISH
     assert sig.risk_level is RiskLevel.EXTREME
 
 
 def test_unknown_scenario_falls_back_to_neutral(uptrend_candles):
-    sig = MockMacroAnalyzer().analyze("AAPL", uptrend_candles,
-                                      scenario="not_a_real_regime")
+    sig = MockMacroAnalyzer().analyze("AAPL", uptrend_candles, scenario="not_a_real_regime")
     assert sig.regime_label == "neutral"
 
 
@@ -46,8 +44,15 @@ def test_macro_engine_uses_mock_by_default(uptrend_candles):
 
 
 def test_scenario_scores_in_bounds():
-    for name in ("risk_on", "panic", "war", "credit_crisis", "fed_dovish",
-                 "fed_hawkish", "neutral"):
+    for name in (
+        "risk_on",
+        "panic",
+        "war",
+        "credit_crisis",
+        "fed_dovish",
+        "fed_hawkish",
+        "neutral",
+    ):
         sc = get_scenario(name)
         assert -1.0 <= sc.score <= 1.0
         assert 0.0 <= sc.confidence <= 1.0

@@ -21,7 +21,7 @@ import hashlib
 import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from ..exchanges.mock import build_orderbook
 from ..models import OHLCV, OrderBookSnapshot, PriceTick
@@ -35,14 +35,14 @@ class SymbolProfile:
     """Deterministic market character for one simulated symbol."""
 
     base_price: float
-    volume_24h_usd: float    # average daily dollar volume
+    volume_24h_usd: float  # average daily dollar volume
     spread_bps: float
     book_base_qty: float
     book_depth: int
-    trend_amp: float        # slow ~1-day swing amplitude (log units)
-    cycle_amp: float        # medium ~2h cycle amplitude
-    chop_amp: float         # fast ~15min wobble amplitude
-    noise: float            # per-minute random amplitude
+    trend_amp: float  # slow ~1-day swing amplitude (log units)
+    cycle_amp: float  # medium ~2h cycle amplitude
+    chop_amp: float  # fast ~15min wobble amplitude
+    noise: float  # per-minute random amplitude
 
 
 # A curated set of liquid US large caps + index ETFs, each with a deliberately
@@ -86,8 +86,7 @@ _PROFILES: Dict[str, SymbolProfile] = {
     "QQQ": SymbolProfile(520.0, 1.8e10, 2.0, 29.0, 20, 0.014, 0.006, 0.0022, 0.0009),
 }
 
-_DEFAULT_PROFILE = SymbolProfile(150.0, 1.0e9, 5.0, 100.0, 20,
-                                 0.020, 0.012, 0.0060, 0.0020)
+_DEFAULT_PROFILE = SymbolProfile(150.0, 1.0e9, 5.0, 100.0, 20, 0.020, 0.012, 0.0060, 0.0020)
 
 
 def profile_for(symbol: str) -> SymbolProfile:
@@ -138,8 +137,7 @@ class LiveMockFeed:
         )
         return p.base_price * math.exp(log_offset)
 
-    def candles_at(self, symbol: str, as_of: datetime,
-                   n_bars: int = 300) -> List[OHLCV]:
+    def candles_at(self, symbol: str, as_of: datetime, n_bars: int = 300) -> List[OHLCV]:
         """The ``n_bars`` 1-minute candles ending at ``as_of``."""
         end_m = minute_index(as_of)
         candles: List[OHLCV] = []
@@ -151,11 +149,17 @@ class LiveMockFeed:
             lo = min(open_, close) * (1.0 - wick)
             vol = 800.0 + abs(_hash_unit(f"{symbol}:vol:{m}")) * 600.0
             ts = _EPOCH + timedelta(minutes=m)
-            candles.append(OHLCV(
-                symbol=symbol, timestamp=ts,
-                open=round(open_, 4), high=round(hi, 4),
-                low=round(lo, 4), close=round(close, 4),
-                volume=round(vol, 4)))
+            candles.append(
+                OHLCV(
+                    symbol=symbol,
+                    timestamp=ts,
+                    open=round(open_, 4),
+                    high=round(hi, 4),
+                    low=round(lo, 4),
+                    close=round(close, 4),
+                    volume=round(vol, 4),
+                )
+            )
         return candles
 
     def orderbook_at(self, symbol: str, as_of: datetime) -> OrderBookSnapshot:
@@ -166,16 +170,24 @@ class LiveMockFeed:
         # Imbalance drifts deterministically with time.
         imbalance = 0.35 * _hash_unit(f"{symbol}:imb:{m // 3}")
         return build_orderbook(
-            symbol=symbol, mid_price=price, exchange="observatory",
-            depth=p.book_depth, spread_bps=p.spread_bps,
-            base_quantity=p.book_base_qty, imbalance=imbalance,
-            timestamp=_EPOCH + timedelta(minutes=m), jitter=0.0)
+            symbol=symbol,
+            mid_price=price,
+            exchange="observatory",
+            depth=p.book_depth,
+            spread_bps=p.spread_bps,
+            base_quantity=p.book_base_qty,
+            imbalance=imbalance,
+            timestamp=_EPOCH + timedelta(minutes=m),
+            jitter=0.0,
+        )
 
     def tick_at(self, symbol: str, as_of: datetime) -> PriceTick:
         p = profile_for(symbol)
         m = minute_index(as_of)
         return PriceTick(
-            symbol=symbol, exchange="observatory",
+            symbol=symbol,
+            exchange="observatory",
             price=self._price_at_minute(symbol, m),
             timestamp=_EPOCH + timedelta(minutes=m),
-            volume_24h=p.volume_24h_usd)
+            volume_24h=p.volume_24h_usd,
+        )

@@ -33,19 +33,17 @@ def _isolate_observatory_state(tmp_path, monkeypatch):
     ``data/learning_state.json`` / ``data/now.json`` and ``reports/observer/``
     — clobbering a live bot's state. Every test gets its own throwaway dir.
     """
+    from nighttrade.dashboard import data as _dash_data
     from nighttrade.observatory import learning as _learning
     from nighttrade.observatory import observer as _observer
-    from nighttrade.dashboard import data as _dash_data
 
-    monkeypatch.setattr(_learning, "LEARNING_STATE_PATH",
-                        tmp_path / "learning_state.json")
+    monkeypatch.setattr(_learning, "LEARNING_STATE_PATH", tmp_path / "learning_state.json")
     monkeypatch.setattr(_observer, "_NOW_PATH", tmp_path / "now.json")
     monkeypatch.setattr(_observer, "_OBSERVER_REPORTS", tmp_path / "observer")
     monkeypatch.setattr(_observer, "_LOG_FILE", tmp_path / "nighttrade.log")
     # The dashboard reads the same runtime-state files; redirect them too so a
     # dashboard test sees the state the observer test wrote, not the real one.
-    monkeypatch.setattr(_dash_data, "_LEARNING_STATE",
-                        tmp_path / "learning_state.json")
+    monkeypatch.setattr(_dash_data, "_LEARNING_STATE", tmp_path / "learning_state.json")
     monkeypatch.setattr(_dash_data, "_NOW_PATH", tmp_path / "now.json")
 
 
@@ -58,22 +56,25 @@ def config():
 @pytest.fixture(scope="session")
 def uptrend_candles():
     """A deterministic upward-drifting candle series."""
-    return generate_random_walk("AAPL", n_bars=300, start_price=30_000.0,
-                                drift=0.0010, volatility=0.004, seed=3)
+    return generate_random_walk(
+        "AAPL", n_bars=300, start_price=30_000.0, drift=0.0010, volatility=0.004, seed=3
+    )
 
 
 @pytest.fixture(scope="session")
 def flat_candles():
     """A deterministic, low-drift candle series."""
-    return generate_random_walk("AAPL", n_bars=300, start_price=30_000.0,
-                                drift=0.0, volatility=0.005, seed=8)
+    return generate_random_walk(
+        "AAPL", n_bars=300, start_price=30_000.0, drift=0.0, volatility=0.005, seed=8
+    )
 
 
 @pytest.fixture(scope="session")
 def long_candles():
     """A longer series suitable for ML training / walk-forward."""
-    return generate_random_walk("AAPL", n_bars=700, start_price=30_000.0,
-                                drift=0.0003, volatility=0.006, seed=5)
+    return generate_random_walk(
+        "AAPL", n_bars=700, start_price=30_000.0, drift=0.0003, volatility=0.006, seed=5
+    )
 
 
 @pytest.fixture(scope="session")

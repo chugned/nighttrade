@@ -15,7 +15,7 @@ This feed is READ-ONLY market data. It never places an order.
 from __future__ import annotations
 
 import time as _time
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from ..exchanges.mock import build_orderbook
@@ -28,9 +28,17 @@ _log = get_logger("observatory.live_feed")
 def _synthetic_book(symbol: str, price: float, when: datetime) -> OrderBookSnapshot:
     """A synthetic top-of-book (equities have no free L2 feed)."""
     base_qty = max(200_000.0 / (price * 6.0), 1.0)
-    return build_orderbook(symbol=symbol, mid_price=price, exchange="yfinance",
-                           depth=20, spread_bps=5.0, base_quantity=base_qty,
-                           imbalance=0.0, timestamp=when, jitter=0.0)
+    return build_orderbook(
+        symbol=symbol,
+        mid_price=price,
+        exchange="yfinance",
+        depth=20,
+        spread_bps=5.0,
+        base_quantity=base_qty,
+        imbalance=0.0,
+        timestamp=when,
+        jitter=0.0,
+    )
 
 
 class YFinanceFeed:
@@ -40,8 +48,9 @@ class YFinanceFeed:
     #: gates prediction-making on the market clock when the feed is live.
     respects_market_hours = True
 
-    def __init__(self, symbols: List[str], refresh_seconds: float = 120.0,
-                 period: str = "2d") -> None:
+    def __init__(
+        self, symbols: List[str], refresh_seconds: float = 120.0, period: str = "2d"
+    ) -> None:
         if not symbols:
             raise ValueError("YFinanceFeed needs at least one symbol")
         self._symbols = [s.upper() for s in symbols]
@@ -68,8 +77,11 @@ class YFinanceFeed:
 
     def _ensure_fresh(self) -> None:
         now = _time.monotonic()
-        if (self._fetched_monotonic is not None and self._cache
-                and now - self._fetched_monotonic < self._refresh_seconds):
+        if (
+            self._fetched_monotonic is not None
+            and self._cache
+            and now - self._fetched_monotonic < self._refresh_seconds
+        ):
             return
         self._refresh()
 
@@ -92,16 +104,25 @@ class YFinanceFeed:
         import gc  # noqa: PLC0415
 
         self._eur_per_usd = self._fetch_eur_per_usd()
-        _log.info("fetching live intraday data for %d symbols (EUR/USD x%.4f)",
-                  len(self._symbols), self._eur_per_usd)
+        _log.info(
+            "fetching live intraday data for %d symbols (EUR/USD x%.4f)",
+            len(self._symbols),
+            self._eur_per_usd,
+        )
         # NT-CRASH fix: yfinance with threads=True spawns one thread per
         # ticker (503 for S&P 500). macOS rejects that many concurrent
         # threads with "RuntimeError: can't start new thread", crashing
         # the bot at startup. Cap concurrency at 8 — gives most of the
         # speedup with no risk of exhausting the OS thread limit.
-        data = yf.download(self._symbols, period=self._period, interval="1m",
-                           group_by="ticker", threads=8, progress=False,
-                           auto_adjust=False)
+        data = yf.download(
+            self._symbols,
+            period=self._period,
+            interval="1m",
+            group_by="ticker",
+            threads=8,
+            progress=False,
+            auto_adjust=False,
+        )
         cache: Dict[str, List[OHLCV]] = {}
         cap = self._MAX_CACHED_BARS_PER_SYMBOL
         for sym in self._symbols:
@@ -120,8 +141,12 @@ class YFinanceFeed:
             self._cache = cache
             self._fetched_monotonic = _time.monotonic()
             del old_cache
-            _log.info("live feed cached %d/%d symbols (cap=%d bars/sym)",
-                      len(cache), len(self._symbols), cap)
+            _log.info(
+                "live feed cached %d/%d symbols (cap=%d bars/sym)",
+                len(cache),
+                len(self._symbols),
+                cap,
+            )
         else:
             _log.warning("live feed refresh returned no usable data")
         # NT-LEAK fix: yfinance internally accumulates session state +
@@ -153,16 +178,21 @@ class YFinanceFeed:
             return candles
         fx = self._eur_per_usd
         for ts, row in frame.dropna().iterrows():
-            o, h, l, c = (row.get("Open"), row.get("High"),
-                          row.get("Low"), row.get("Close"))
+            o, h, l, c = (row.get("Open"), row.get("High"), row.get("Low"), row.get("Close"))
             if None in (o, h, l, c) or min(o, h, l, c) <= 0:
                 continue
             try:
-                candles.append(OHLCV(
-                    symbol=symbol, timestamp=ts.to_pydatetime(),
-                    open=float(o) * fx, high=float(h) * fx,
-                    low=float(l) * fx, close=float(c) * fx,
-                    volume=float(row.get("Volume") or 0.0)))
+                candles.append(
+                    OHLCV(
+                        symbol=symbol,
+                        timestamp=ts.to_pydatetime(),
+                        open=float(o) * fx,
+                        high=float(h) * fx,
+                        low=float(l) * fx,
+                        close=float(c) * fx,
+                        volume=float(row.get("Volume") or 0.0),
+                    )
+                )
             except (ValueError, TypeError):
                 continue
         return candles
@@ -181,8 +211,7 @@ class YFinanceFeed:
         try:
             import yfinance as yf
 
-            frame = yf.Ticker(symbol).history(period=self._period,
-                                              interval="1m", auto_adjust=False)
+            frame = yf.Ticker(symbol).history(period=self._period, interval="1m", auto_adjust=False)
         except Exception as exc:  # noqa: BLE001
             _log.warning("live feed could not fetch %s: %s", symbol, exc)
             return []
@@ -190,8 +219,7 @@ class YFinanceFeed:
 
     # -- feed interface ------------------------------------------------------
 
-    def candles_at(self, symbol: str, as_of: datetime,
-                   n_bars: int = 300) -> List[OHLCV]:
+    def candles_at(self, symbol: str, as_of: datetime, n_bars: int = 300) -> List[OHLCV]:
         """Real 1-minute candles for ``symbol`` up to ``as_of``."""
         candles = [c for c in self._candles(symbol) if c.timestamp <= as_of]
         if not candles:
@@ -210,13 +238,17 @@ class YFinanceFeed:
     def orderbook_at(self, symbol: str, as_of: datetime) -> OrderBookSnapshot:
         candles = self.candles_at(symbol, as_of, n_bars=1)
         price = candles[-1].close if candles else self.price_at(symbol, as_of)
-        return _synthetic_book(symbol, price, candles[-1].timestamp
-                               if candles else as_of)
+        return _synthetic_book(symbol, price, candles[-1].timestamp if candles else as_of)
 
     def tick_at(self, symbol: str, as_of: datetime) -> PriceTick:
         candles = self.candles_at(symbol, as_of, n_bars=390)
         last = candles[-1]
         # Daily dollar volume = today's traded shares x price.
         dollar_volume = sum(c.volume for c in candles) * last.close
-        return PriceTick(symbol=symbol, exchange="yfinance", price=last.close,
-                         timestamp=last.timestamp, volume_24h=dollar_volume)
+        return PriceTick(
+            symbol=symbol,
+            exchange="yfinance",
+            price=last.close,
+            timestamp=last.timestamp,
+            volume_24h=dollar_volume,
+        )

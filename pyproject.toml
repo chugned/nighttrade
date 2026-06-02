@@ -61,3 +61,25 @@ markers = [
 [tool.coverage.run]
 source = ["src/nighttrade"]
 branch = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+extend-exclude = ["artifacts", "data", "logs", "reports"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "SIM", "UP"]
+ignore = ["B008", "B904", "SIM108", "UP007", "E501"]
+
+[tool.black]
+line-length = 100
+target-version = ["py39"]
+extend-exclude = '''(artifacts | data | logs | reports)'''
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+warn_return_any = false
+exclude = ["artifacts/", "data/", "logs/", "reports/"]

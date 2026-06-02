@@ -46,15 +46,18 @@ class RegimeGate:
             return GateDecision(
                 True,
                 f"regime '{regime}': only {samples} evaluated prediction(s) "
-                f"— gathering evidence, gate inactive")
+                f"— gathering evidence, gate inactive",
+            )
 
         accuracy = group.accuracy
         if accuracy < self.break_even:
             return GateDecision(
                 False,
                 f"regime '{regime}': measured accuracy {accuracy:.0%} is "
-                f"below break-even {self.break_even:.0%} — entries blocked")
+                f"below break-even {self.break_even:.0%} — entries blocked",
+            )
         return GateDecision(
             True,
             f"regime '{regime}': accuracy {accuracy:.0%} clears break-even "
-            f"{self.break_even:.0%}")
+            f"{self.break_even:.0%}",
+        )

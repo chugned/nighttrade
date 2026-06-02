@@ -28,10 +28,10 @@ from ..config.schema import MicrostructureConfig
 from ..indicators import core
 from ..indicators.frame import ohlcv_to_frame
 from ..models import (
+    OHLCV,
     Bias,
     MarketRegime,
     MicrostructureSignal,
-    OHLCV,
     OrderBookSnapshot,
 )
 
@@ -82,10 +82,7 @@ def detect_halt(candles: List[OHLCV], lookback: int = 5) -> bool:
     recent = candles[-lookback:]
     if len(recent) < 3:
         return False
-    frozen = sum(
-        1 for c in recent
-        if c.volume <= 0.0 and c.high == c.low == c.open == c.close
-    )
+    frozen = sum(1 for c in recent if c.volume <= 0.0 and c.high == c.low == c.open == c.close)
     return frozen >= 3
 
 
@@ -118,11 +115,17 @@ class MicrostructureEngine:
         if not candles:
             # No tape — emit an honest neutral, low-confidence signal.
             return MicrostructureSignal(
-                symbol=symbol, timestamp=timestamp, bias=Bias.NEUTRAL,
-                score=0.0, confidence=0.1,
+                symbol=symbol,
+                timestamp=timestamp,
+                bias=Bias.NEUTRAL,
+                score=0.0,
+                confidence=0.1,
                 reasoning=reasoning + ["No intraday tape available"],
-                imbalance=0.0, spread_bps=spread_bps,
-                regime=MarketRegime.RANGE, thin_liquidity=True, chop_zone=False,
+                imbalance=0.0,
+                spread_bps=spread_bps,
+                regime=MarketRegime.RANGE,
+                thin_liquidity=True,
+                chop_zone=False,
                 liquidity_interpretation="no tape data",
             )
 
@@ -133,9 +136,7 @@ class MicrostructureEngine:
         imbalance = order_flow_imbalance(candles, cfg.flow_window)
         if abs(imbalance) >= cfg.imbalance_strong:
             side = "buyers" if imbalance > 0 else "sellers"
-            reasoning.append(
-                f"Order flow {abs(imbalance) * 100:.0f}% toward {side}"
-            )
+            reasoning.append(f"Order flow {abs(imbalance) * 100:.0f}% toward {side}")
         else:
             reasoning.append(f"Order flow {imbalance * 100:+.0f}% (balanced tape)")
 
@@ -146,16 +147,13 @@ class MicrostructureEngine:
         if vwap:
             where = "above" if vwap_dev >= 0 else "below"
             tag = " — stretched" if stretched else ""
-            reasoning.append(
-                f"Price {vwap_dev * 100:+.2f}% {where} session VWAP{tag}"
-            )
+            reasoning.append(f"Price {vwap_dev * 100:+.2f}% {where} session VWAP{tag}")
 
         # --- Relative volume ---
         rvol = relative_volume(candles, cfg.rvol_window)
         low_participation = rvol < cfg.low_rvol_threshold
         reasoning.append(
-            f"Relative volume {rvol:.2f}x"
-            + (" — thin participation" if low_participation else "")
+            f"Relative volume {rvol:.2f}x" + (" — thin participation" if low_participation else "")
         )
 
         # --- Session gap ---
@@ -177,7 +175,7 @@ class MicrostructureEngine:
         reasoning.append(f"Regime: {regime.value}")
 
         # --- Swing support / resistance ---
-        swing = candles[-cfg.swing_window:]
+        swing = candles[-cfg.swing_window :]
         support = round(min(c.low for c in swing), 4)
         resistance = round(max(c.high for c in swing), 4)
         reasoning.append(f"Swing support {support:,.2f} / resistance {resistance:,.2f}")
@@ -233,9 +231,7 @@ class MicrostructureEngine:
             liquidity_interpretation=interpretation,
         )
 
-    def _regime(
-        self, candles: Optional[List[OHLCV]]
-    ) -> "tuple[MarketRegime, bool]":
+    def _regime(self, candles: Optional[List[OHLCV]]) -> tuple[MarketRegime, bool]:
         """Classify the market regime and whether it is a chop zone."""
         if not candles or len(candles) < 30:
             return MarketRegime.RANGE, False
@@ -265,8 +261,9 @@ class MicrostructureEngine:
         return MarketRegime.TREND_DOWN, False
 
     @staticmethod
-    def _interpret(imbalance: float, vwap_dev: float, low_vol: bool,
-                   wide: bool, chop: bool, halted: bool) -> str:
+    def _interpret(
+        imbalance: float, vwap_dev: float, low_vol: bool, wide: bool, chop: bool, halted: bool
+    ) -> str:
         parts: List[str] = []
         if imbalance > 0.1:
             parts.append("buy-side tape favors upside")

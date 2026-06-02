@@ -32,12 +32,12 @@ class RankedStock:
     """One stock's place in the cross-sectional ranking."""
 
     symbol: str
-    rank: int                       # 1 = most attractive
-    percentile: float               # 1.0 = top of the universe
-    composite: float                # blended weighted z-score
-    composite_z: float              # composite, re-standardized across universe
-    factor_z: Dict[str, float]      # per-factor cross-sectional z-scores
-    basket: str                     # LONG / NEUTRAL / SHORT
+    rank: int  # 1 = most attractive
+    percentile: float  # 1.0 = top of the universe
+    composite: float  # blended weighted z-score
+    composite_z: float  # composite, re-standardized across universe
+    factor_z: Dict[str, float]  # per-factor cross-sectional z-scores
+    basket: str  # LONG / NEUTRAL / SHORT
     price: float
 
 
@@ -46,8 +46,8 @@ class RankedUniverse:
     """The full ranked universe for one cross-sectional snapshot."""
 
     timestamp: datetime
-    stocks: List[RankedStock]            # ordered best -> worst
-    weights: Dict[str, float]            # renormalized weights actually used
+    stocks: List[RankedStock]  # ordered best -> worst
+    weights: Dict[str, float]  # renormalized weights actually used
     excluded: List[str] = field(default_factory=list)  # dropped by liquidity gate
 
     @property
@@ -95,8 +95,7 @@ def rank_universe(
     timestamp = timestamp or datetime.now(timezone.utc)
 
     kept = [f for f in factors if f.dollar_volume >= config.min_dollar_volume]
-    excluded = sorted(f.symbol for f in factors
-                      if f.dollar_volume < config.min_dollar_volume)
+    excluded = sorted(f.symbol for f in factors if f.dollar_volume < config.min_dollar_volume)
     if not kept:
         raise ValueError("no stocks cleared the liquidity gate — cannot rank")
 
@@ -137,16 +136,17 @@ def rank_universe(
             basket = _SHORT
         else:
             basket = _NEUTRAL
-        ranked.append(RankedStock(
-            symbol=kept[idx].symbol,
-            rank=position + 1,
-            percentile=1.0 if n == 1 else 1.0 - position / (n - 1),
-            composite=float(composite[idx]),
-            composite_z=float(composite_z[idx]),
-            factor_z={name: float(factor_z[name][idx]) for name in names},
-            basket=basket,
-            price=kept[idx].price,
-        ))
+        ranked.append(
+            RankedStock(
+                symbol=kept[idx].symbol,
+                rank=position + 1,
+                percentile=1.0 if n == 1 else 1.0 - position / (n - 1),
+                composite=float(composite[idx]),
+                composite_z=float(composite_z[idx]),
+                factor_z={name: float(factor_z[name][idx]) for name in names},
+                basket=basket,
+                price=kept[idx].price,
+            )
+        )
 
-    return RankedUniverse(timestamp=timestamp, stocks=ranked,
-                          weights=weights, excluded=excluded)
+    return RankedUniverse(timestamp=timestamp, stocks=ranked, weights=weights, excluded=excluded)

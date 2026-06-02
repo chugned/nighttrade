@@ -56,8 +56,15 @@ def compute_factors(
     Returns ``None`` when there is not enough history to compute the factors
     — that stock simply does not enter the cross-section this cycle.
     """
-    need = max(config.momentum_lookback, config.trend_window,
-               config.volatility_window, config.reversion_rsi_period) + 2
+    need = (
+        max(
+            config.momentum_lookback,
+            config.trend_window,
+            config.volatility_window,
+            config.reversion_rsi_period,
+        )
+        + 2
+    )
     if len(candles) < need:
         return None
 
@@ -72,7 +79,7 @@ def compute_factors(
     momentum = _finite(price / past - 1.0) if past > 0 else 0.0
 
     # Trend quality — slope-signed R² of a linear fit to log price.
-    window = closes[-config.trend_window:]
+    window = closes[-config.trend_window :]
     log_w = np.log(window)
     x = np.arange(len(log_w), dtype=float)
     slope = float(np.polyfit(x, log_w, 1)[0])
@@ -88,7 +95,7 @@ def compute_factors(
     reversion = _finite((50.0 - rsi) / 50.0)
 
     # Low volatility — negative realized vol of recent log returns.
-    log_returns = np.diff(np.log(closes))[-config.volatility_window:]
+    log_returns = np.diff(np.log(closes))[-config.volatility_window :]
     realized_vol = float(np.std(log_returns)) if log_returns.size else 0.0
     low_vol = -_finite(realized_vol)
 

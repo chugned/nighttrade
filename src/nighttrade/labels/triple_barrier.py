@@ -30,8 +30,7 @@ def triple_barrier_labels(frame: pd.DataFrame, config: AppConfig) -> pd.Series:
     low = frame["low"].to_numpy(dtype=float)
     close = frame["close"].to_numpy(dtype=float)
     n = len(close)
-    atr = core.atr(frame["high"], frame["low"], frame["close"],
-                   _ATR_PERIOD).to_numpy(dtype=float)
+    atr = core.atr(frame["high"], frame["low"], frame["close"], _ATR_PERIOD).to_numpy(dtype=float)
     time_stop = config.risk.time_stop_bars or 20
 
     labels = np.full(n, np.nan)
@@ -40,8 +39,7 @@ def triple_barrier_labels(frame: pd.DataFrame, config: AppConfig) -> pd.Series:
         if not np.isfinite(vol) or price <= 0 or i + 1 >= n:
             continue
         # ATR-based volatility unit — the same geometry the fusion engine uses.
-        frac = min(max(vol / price, fusion.min_volatility_fraction),
-                   fusion.max_volatility_fraction)
+        frac = min(max(vol / price, fusion.min_volatility_fraction), fusion.max_volatility_fraction)
         unit = price * frac
         stop = price - fusion.stop_vol_mult * unit
         target = price + fusion.target_vol_mult * unit
@@ -49,10 +47,10 @@ def triple_barrier_labels(frame: pd.DataFrame, config: AppConfig) -> pd.Series:
         end = min(i + time_stop, n - 1)
         label = None
         for j in range(i + 1, end + 1):
-            if low[j] <= stop:           # stop touched first (tie -> stop)
+            if low[j] <= stop:  # stop touched first (tie -> stop)
                 label = 0
                 break
-            if high[j] >= target:        # target touched first
+            if high[j] >= target:  # target touched first
                 label = 1
                 break
         if label is None:

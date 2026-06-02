@@ -44,9 +44,15 @@ _SYNTHETIC_SPREAD_BPS = 5.0
 def _synthetic_book(symbol: str, exchange: str, price: float) -> OrderBookSnapshot:
     """A synthetic top-of-book around ``price`` (equities have no free L2)."""
     return build_orderbook(
-        symbol=symbol, mid_price=price, exchange=exchange, depth=10,
-        spread_bps=_SYNTHETIC_SPREAD_BPS, base_quantity=max(price, 1.0),
-        imbalance=0.0, timestamp=datetime.now(timezone.utc), jitter=0.0,
+        symbol=symbol,
+        mid_price=price,
+        exchange=exchange,
+        depth=10,
+        spread_bps=_SYNTHETIC_SPREAD_BPS,
+        base_quantity=max(price, 1.0),
+        imbalance=0.0,
+        timestamp=datetime.now(timezone.utc),
+        jitter=0.0,
     )
 
 
@@ -55,8 +61,9 @@ class YFinanceClient(MarketDataClient):
 
     name = "yfinance"
 
-    def __init__(self, timeout: float = 5.0, max_retries: int = 3,
-                 allow_network: bool = False) -> None:
+    def __init__(
+        self, timeout: float = 5.0, max_retries: int = 3, allow_network: bool = False
+    ) -> None:
         self._timeout = timeout
         self._max_retries = max(1, max_retries)
         self._allow_network = allow_network
@@ -64,9 +71,7 @@ class YFinanceClient(MarketDataClient):
     def _yf(self):
         """Import yfinance lazily so it is only required for online runs."""
         if not self._allow_network:
-            raise ExchangeError(
-                "yfinance: network disabled (set runtime.allow_network=true)"
-            )
+            raise ExchangeError("yfinance: network disabled (set runtime.allow_network=true)")
         try:
             import yfinance  # noqa: WPS433 - intentional lazy import
         except ImportError as exc:  # pragma: no cover - optional dependency
@@ -86,7 +91,9 @@ class YFinanceClient(MarketDataClient):
         if not price or price <= 0:
             raise ExchangeError(f"yfinance: no price for {symbol}")
         return PriceTick(
-            symbol=symbol, exchange=self.name, price=float(price),
+            symbol=symbol,
+            exchange=self.name,
+            price=float(price),
             timestamp=datetime.now(timezone.utc),
             volume_24h=float(shares) * float(price),  # dollar volume
             status=ExchangeStatus.OK,
@@ -95,8 +102,7 @@ class YFinanceClient(MarketDataClient):
     def get_ohlcv(self, symbol: str, limit: int = 200) -> List[OHLCV]:
         yf = self._yf()
         try:
-            frame = yf.Ticker(symbol).history(period="5d", interval="1m",
-                                              auto_adjust=False)
+            frame = yf.Ticker(symbol).history(period="5d", interval="1m", auto_adjust=False)
         except Exception as exc:  # noqa: BLE001
             raise ExchangeError(f"yfinance: ohlcv failed for {symbol}: {exc}") from exc
         if frame is None or frame.empty:
@@ -104,12 +110,17 @@ class YFinanceClient(MarketDataClient):
         rows = frame.tail(limit)
         candles: List[OHLCV] = []
         for ts, row in rows.iterrows():
-            candles.append(OHLCV(
-                symbol=symbol, timestamp=ts.to_pydatetime(),
-                open=float(row["Open"]), high=float(row["High"]),
-                low=float(row["Low"]), close=float(row["Close"]),
-                volume=float(row["Volume"] or 0.0),
-            ))
+            candles.append(
+                OHLCV(
+                    symbol=symbol,
+                    timestamp=ts.to_pydatetime(),
+                    open=float(row["Open"]),
+                    high=float(row["High"]),
+                    low=float(row["Low"]),
+                    close=float(row["Close"]),
+                    volume=float(row["Volume"] or 0.0),
+                )
+            )
         return candles
 
     def get_orderbook(self, symbol: str, depth: int = 20) -> OrderBookSnapshot:
@@ -121,17 +132,16 @@ class _HttpClient(MarketDataClient):
 
     base_url: str = ""
 
-    def __init__(self, timeout: float = 5.0, max_retries: int = 3,
-                 allow_network: bool = False) -> None:
+    def __init__(
+        self, timeout: float = 5.0, max_retries: int = 3, allow_network: bool = False
+    ) -> None:
         self._timeout = timeout
         self._max_retries = max(1, max_retries)
         self._allow_network = allow_network
 
     def _get_text(self, path: str, params: Dict[str, Any]) -> str:
         if not self._allow_network:
-            raise ExchangeError(
-                f"{self.name}: network disabled (set runtime.allow_network=true)"
-            )
+            raise ExchangeError(f"{self.name}: network disabled (set runtime.allow_network=true)")
 
         @retry(
             retry=retry_if_exception_type((httpx.HTTPError,)),
@@ -166,8 +176,8 @@ class StooqClient(_HttpClient):
 
     def get_ticker(self, symbol: str) -> PriceTick:
         text = self._get_text(
-            "/q/l/", {"s": self._stooq_symbol(symbol),
-                      "f": "sd2t2ohlcv", "h": "", "e": "csv"})
+            "/q/l/", {"s": self._stooq_symbol(symbol), "f": "sd2t2ohlcv", "h": "", "e": "csv"}
+        )
         rows = list(csv.DictReader(io.StringIO(text)))
         if not rows:
             raise ExchangeError(f"stooq: empty response for {symbol}")
@@ -178,24 +188,31 @@ class StooqClient(_HttpClient):
         price = float(close)
         volume = float(row.get("Volume") or 0.0)
         return PriceTick(
-            symbol=symbol, exchange=self.name, price=price,
+            symbol=symbol,
+            exchange=self.name,
+            price=price,
             timestamp=datetime.now(timezone.utc),
-            volume_24h=volume * price, status=ExchangeStatus.OK,
+            volume_24h=volume * price,
+            status=ExchangeStatus.OK,
         )
 
     def get_ohlcv(self, symbol: str, limit: int = 200) -> List[OHLCV]:
-        text = self._get_text(
-            "/q/d/l/", {"s": self._stooq_symbol(symbol), "i": "d"})
+        text = self._get_text("/q/d/l/", {"s": self._stooq_symbol(symbol), "i": "d"})
         rows = list(csv.DictReader(io.StringIO(text)))
         candles: List[OHLCV] = []
         for row in rows[-limit:]:
             try:
-                candles.append(OHLCV(
-                    symbol=symbol, timestamp=row["Date"],
-                    open=float(row["Open"]), high=float(row["High"]),
-                    low=float(row["Low"]), close=float(row["Close"]),
-                    volume=float(row.get("Volume") or 0.0),
-                ))
+                candles.append(
+                    OHLCV(
+                        symbol=symbol,
+                        timestamp=row["Date"],
+                        open=float(row["Open"]),
+                        high=float(row["High"]),
+                        low=float(row["Low"]),
+                        close=float(row["Close"]),
+                        volume=float(row.get("Volume") or 0.0),
+                    )
+                )
             except (KeyError, ValueError):
                 continue
         if not candles:
@@ -212,8 +229,9 @@ _REGISTRY = {
 }
 
 
-def build_public_client(name: str, timeout: float = 5.0, max_retries: int = 3,
-                        allow_network: bool = False) -> MarketDataClient:
+def build_public_client(
+    name: str, timeout: float = 5.0, max_retries: int = 3, allow_network: bool = False
+) -> MarketDataClient:
     """Factory: construct a public stock-data client by name."""
     cls = _REGISTRY.get(name.lower())
     if cls is None:

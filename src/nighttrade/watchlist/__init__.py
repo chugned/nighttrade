@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from .loader import DEFAULT_WATCHLIST_PATH, load_watchlist_config
 from .screener import (
     AssetMetrics,
     AssetScreening,
@@ -9,13 +10,12 @@ from .screener import (
     extract_metrics,
     screen_asset,
 )
-from .loader import DEFAULT_WATCHLIST_PATH, load_watchlist_config
+from .sp500 import liquid_universe
 from .universe import (
     build_mock_asset_data,
     build_mock_universe,
     demo_universe_symbols,
 )
-from .sp500 import liquid_universe
 
 __all__ = [
     "AssetMetrics",

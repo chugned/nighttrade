@@ -16,7 +16,7 @@ it has the evidence to.
 
 from __future__ import annotations
 
-from typing import List, Sequence
+from collections.abc import Sequence
 
 import numpy as np
 
@@ -31,8 +31,7 @@ class ConfidenceCalibrator:
         self.samples = 0
         self._iso = None  # a fitted IsotonicRegression, or None (identity)
 
-    def fit(self, confidences: Sequence[float],
-            outcomes: Sequence[int]) -> "ConfidenceCalibrator":
+    def fit(self, confidences: Sequence[float], outcomes: Sequence[int]) -> ConfidenceCalibrator:
         """Fit from parallel (stated confidence, was-correct 0/1) sequences."""
         conf = np.asarray(list(confidences), dtype=float)
         corr = np.asarray(list(outcomes), dtype=float)
@@ -73,14 +72,17 @@ class CalibrationGate:
             return GateDecision(
                 True,
                 f"calibration inactive ({self.calibrator.samples} evaluated "
-                f"prediction(s)) — stated confidence {confidence:.0%}")
+                f"prediction(s)) — stated confidence {confidence:.0%}",
+            )
         if calibrated < self.floor:
             return GateDecision(
                 False,
                 f"calibrated win probability {calibrated:.0%} "
                 f"(stated {confidence:.0%}) is below the floor "
-                f"{self.floor:.0%} — entry blocked")
+                f"{self.floor:.0%} — entry blocked",
+            )
         return GateDecision(
             True,
             f"calibrated win probability {calibrated:.0%} "
-            f"(stated {confidence:.0%}) clears the floor {self.floor:.0%}")
+            f"(stated {confidence:.0%}) clears the floor {self.floor:.0%}",
+        )

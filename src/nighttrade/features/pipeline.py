@@ -48,7 +48,7 @@ def compute_features(
     high = frame["high"]
     low = frame["low"]
     volume = frame["volume"]
-    feats: "dict[str, pd.Series]" = {}
+    feats: dict[str, pd.Series] = {}
 
     # --- Multi-horizon returns ---
     for w in fcfg.return_windows:
@@ -76,7 +76,7 @@ def compute_features(
     feats["volatility"] = core.volatility(close, icfg.volatility_window)
 
     # --- Candle geometry ---
-    rng = (high - low)
+    rng = high - low
     feats["range_pct"] = rng / close.replace(0.0, np.nan)
     body = (close - frame["open"]).abs()
     feats["body_to_range"] = body / rng.replace(0.0, np.nan)
@@ -101,11 +101,23 @@ def feature_columns(
     fcfg = feature_config or FeatureConfig()
     cols = [f"ret_{w}" for w in fcfg.return_windows]
     cols += [
-        "logret_1", "roll_std", "roll_skew", "roll_kurt",
-        "rsi", "macd", "macd_signal", "macd_hist",
-        "ema_gap", "momentum", "trend_slope", "volatility",
-        "range_pct", "body_to_range", "close_to_high",
-        "volume_z", "volume_chg",
+        "logret_1",
+        "roll_std",
+        "roll_skew",
+        "roll_kurt",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "macd_hist",
+        "ema_gap",
+        "momentum",
+        "trend_slope",
+        "volatility",
+        "range_pct",
+        "body_to_range",
+        "close_to_high",
+        "volume_z",
+        "volume_chg",
     ]
     return cols
 

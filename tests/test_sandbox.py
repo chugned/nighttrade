@@ -19,16 +19,16 @@ from nighttrade.exchanges.credentials import (
     load_sandbox_credentials,
 )
 from nighttrade.exchanges.sandbox import (
+    _PAPER_URLS,
     SandboxExchangeClient,
     SandboxSafetyError,
     _assert_paper_url,
-    _PAPER_URLS,
     build_sandbox_client,
 )
 from nighttrade.paper import PaperBroker, SandboxBroker
 
-
 # --- credentials -----------------------------------------------------------
+
 
 def test_no_credentials_returns_none(monkeypatch):
     monkeypatch.delenv("ALPACA_PAPER_API_KEY", raising=False)
@@ -38,6 +38,7 @@ def test_no_credentials_returns_none(monkeypatch):
 
 def test_partial_credentials_raise(monkeypatch):
     from nighttrade.exchanges.credentials import MissingCredentialsError
+
     monkeypatch.setenv("ALPACA_PAPER_API_KEY", "abc")
     monkeypatch.delenv("ALPACA_PAPER_API_SECRET", raising=False)
     with pytest.raises(MissingCredentialsError):
@@ -77,6 +78,7 @@ def test_live_account_key_rejected():
 
 # --- paper-URL guard -------------------------------------------------------
 
+
 def test_all_sandbox_urls_are_paper():
     for url in _PAPER_URLS.values():
         assert "paper" in url
@@ -84,15 +86,13 @@ def test_all_sandbox_urls_are_paper():
 
 
 def test_live_url_rejected():
-    for url in ("https://api.alpaca.markets",
-                "https://broker-api.alpaca.markets"):
+    for url in ("https://api.alpaca.markets", "https://broker-api.alpaca.markets"):
         with pytest.raises(SandboxSafetyError):
             _assert_paper_url(url)
 
 
 def test_sandbox_client_uses_paper_base_url():
-    client = SandboxExchangeClient(
-        ApiCredentials("alpaca", "k", "s"), SandboxConfig())
+    client = SandboxExchangeClient(ApiCredentials("alpaca", "k", "s"), SandboxConfig())
     assert client.base_url == _PAPER_URLS["alpaca"]
     assert "paper" in client.base_url
 
@@ -100,13 +100,14 @@ def test_sandbox_client_uses_paper_base_url():
 def test_place_order_requires_verified_trade_key():
     """An unverified client cannot place a paper order."""
     from nighttrade.models import Side
-    client = SandboxExchangeClient(
-        ApiCredentials("alpaca", "k", "s"), SandboxConfig())
+
+    client = SandboxExchangeClient(ApiCredentials("alpaca", "k", "s"), SandboxConfig())
     with pytest.raises(SandboxSafetyError):
         client.place_paper_order("AAPL", Side.BUY, 1.0)
 
 
 # --- build / broker --------------------------------------------------------
+
 
 def test_build_sandbox_client_none_when_disabled():
     cfg = load_config(load_dotenv_file=False)

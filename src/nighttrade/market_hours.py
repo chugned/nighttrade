@@ -31,20 +31,43 @@ _POST_CLOSE = time(20, 0)
 
 # Full-day US market holidays (2024–2027). Early-close half-days are ignored
 # on purpose — this is an observation clock, not a clearing calendar.
-_HOLIDAYS: frozenset[date] = frozenset({
-    # 2025
-    date(2025, 1, 1), date(2025, 1, 20), date(2025, 2, 17), date(2025, 4, 18),
-    date(2025, 5, 26), date(2025, 6, 19), date(2025, 7, 4), date(2025, 9, 1),
-    date(2025, 11, 27), date(2025, 12, 25),
-    # 2026
-    date(2026, 1, 1), date(2026, 1, 19), date(2026, 2, 16), date(2026, 4, 3),
-    date(2026, 5, 25), date(2026, 6, 19), date(2026, 7, 3), date(2026, 9, 7),
-    date(2026, 11, 26), date(2026, 12, 25),
-    # 2027
-    date(2027, 1, 1), date(2027, 1, 18), date(2027, 2, 15), date(2027, 3, 26),
-    date(2027, 5, 31), date(2027, 6, 18), date(2027, 7, 5), date(2027, 9, 6),
-    date(2027, 11, 25), date(2027, 12, 24),
-})
+_HOLIDAYS: frozenset[date] = frozenset(
+    {
+        # 2025
+        date(2025, 1, 1),
+        date(2025, 1, 20),
+        date(2025, 2, 17),
+        date(2025, 4, 18),
+        date(2025, 5, 26),
+        date(2025, 6, 19),
+        date(2025, 7, 4),
+        date(2025, 9, 1),
+        date(2025, 11, 27),
+        date(2025, 12, 25),
+        # 2026
+        date(2026, 1, 1),
+        date(2026, 1, 19),
+        date(2026, 2, 16),
+        date(2026, 4, 3),
+        date(2026, 5, 25),
+        date(2026, 6, 19),
+        date(2026, 7, 3),
+        date(2026, 9, 7),
+        date(2026, 11, 26),
+        date(2026, 12, 25),
+        # 2027
+        date(2027, 1, 1),
+        date(2027, 1, 18),
+        date(2027, 2, 15),
+        date(2027, 3, 26),
+        date(2027, 5, 31),
+        date(2027, 6, 18),
+        date(2027, 7, 5),
+        date(2027, 9, 6),
+        date(2027, 11, 25),
+        date(2027, 12, 24),
+    }
+)
 
 
 class MarketSession(str, Enum):
@@ -110,8 +133,7 @@ def next_market_open(when: Optional[datetime] = None) -> datetime:
         candidate = et.replace(hour=9, minute=30, second=0, microsecond=0)
         if is_trading_day(candidate) and et <= candidate:
             return candidate.astimezone(timezone.utc)
-        et = (et + timedelta(days=1)).replace(hour=0, minute=0,
-                                              second=0, microsecond=0)
+        et = (et + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     raise RuntimeError("no market open found within 10 days")  # pragma: no cover
 
 
@@ -124,6 +146,5 @@ def describe(when: Optional[datetime] = None) -> str:
         return f"REGULAR session open ({stamp})"
     if session is MarketSession.CLOSED:
         nxt = next_market_open(et).astimezone(_ET)
-        return (f"market CLOSED ({stamp}) — next open "
-                f"{nxt.strftime('%Y-%m-%d %H:%M %Z')}")
+        return f"market CLOSED ({stamp}) — next open " f"{nxt.strftime('%Y-%m-%d %H:%M %Z')}"
     return f"{session.value.upper().replace('_', '-')} session ({stamp})"

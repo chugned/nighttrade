@@ -12,15 +12,25 @@ _CFG = CrossSectionConfig()
 
 
 def _stock(symbol: str, drift: float, seed: int):
-    return generate_random_walk(symbol, n_bars=220, start_price=200.0,
-                                drift=drift, volatility=0.003, seed=seed)
+    return generate_random_walk(
+        symbol, n_bars=220, start_price=200.0, drift=drift, volatility=0.003, seed=seed
+    )
 
 
 def _universe():
     """A spread of stocks from strongly down-trending to strongly up-trending."""
-    spec = {"DOWN2": -0.0020, "DOWN1": -0.0010, "FLATA": 0.0,
-            "FLATB": 0.0002, "UP1": 0.0010, "UP2": 0.0020,
-            "UP3": 0.0028, "DOWN3": -0.0028, "MIDA": 0.0006, "MIDB": -0.0006}
+    spec = {
+        "DOWN2": -0.0020,
+        "DOWN1": -0.0010,
+        "FLATA": 0.0,
+        "FLATB": 0.0002,
+        "UP1": 0.0010,
+        "UP2": 0.0020,
+        "UP3": 0.0028,
+        "DOWN3": -0.0028,
+        "MIDA": 0.0006,
+        "MIDB": -0.0006,
+    }
     factors = []
     for i, (sym, drift) in enumerate(spec.items()):
         snap = compute_factors(sym, _stock(sym, drift, i + 1), _CFG)
@@ -85,8 +95,7 @@ def test_rank_universe_weights_renormalized_without_ml():
 def test_rank_universe_uses_ml_when_present():
     factors = []
     for i, sym in enumerate(["A", "B", "C", "D", "E"]):
-        factors.append(compute_factors(sym, _stock(sym, 0.001 * i, i + 1),
-                                       _CFG, ml_score=0.1 * i))
+        factors.append(compute_factors(sym, _stock(sym, 0.001 * i, i + 1), _CFG, ml_score=0.1 * i))
     ranked = rank_universe(factors, _CFG)
     assert "ml" in ranked.weights
     assert sum(ranked.weights.values()) == pytest.approx(1.0)

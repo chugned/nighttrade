@@ -37,29 +37,139 @@ _TICKER = re.compile(r"^[A-Z]{1,5}$")
 # Security-name keywords that mark a non-common-stock listing (SPAC warrants,
 # units, rights, preferreds, depositary shares, notes).
 _EXCLUDE_NAME = re.compile(
-    r"\b(warrants?|units?|rights?|preferred|depositary|notes?|when[- ]issued)\b",
-    re.IGNORECASE)
+    r"\b(warrants?|units?|rights?|preferred|depositary|notes?|when[- ]issued)\b", re.IGNORECASE
+)
 
 # Fallback: ~120 of the most liquid US large caps + index ETFs. Used only when
 # the live directories cannot be fetched.
 _FALLBACK: List[str] = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOGL", "GOOG", "TSLA", "AVGO",
-    "BRK-B", "JPM", "V", "MA", "WMT", "JNJ", "XOM", "UNH", "PG", "HD", "COST",
-    "ORCL", "MRK", "ABBV", "BAC", "KO", "PEP", "CVX", "ADBE", "CRM", "NFLX",
-    "AMD", "DIS", "INTC", "QCOM", "TXN", "CSCO", "ACN", "MCD", "ABT", "DHR",
-    "WFC", "LIN", "VZ", "PM", "NKE", "TMO", "IBM", "GE", "CAT", "AXP", "NOW",
-    "INTU", "AMGN", "ISRG", "GS", "MS", "SPGI", "BKNG", "RTX", "PFE", "UBER",
-    "T", "HON", "LOW", "BLK", "ELV", "PLD", "AMAT", "C", "SBUX", "BA", "DE",
-    "MDT", "ADP", "GILD", "LMT", "CB", "MMC", "SYK", "TJX", "VRTX", "REGN",
-    "PGR", "ETN", "BSX", "CI", "MU", "SO", "ZTS", "FI", "BX", "MO", "DUK",
-    "SCHW", "EOG", "SLB", "APD", "CL", "ITW", "PANW", "WM", "CME", "MCK",
-    "TGT", "USB", "PNC", "AON", "GM", "F", "PYPL", "COF", "MAR", "FCX", "EMR",
-    "NSC", "ORLY", "MMM", "ECL", "ADSK", "SPY", "QQQ", "IWM", "DIA",
+    "AAPL",
+    "MSFT",
+    "NVDA",
+    "AMZN",
+    "META",
+    "GOOGL",
+    "GOOG",
+    "TSLA",
+    "AVGO",
+    "BRK-B",
+    "JPM",
+    "V",
+    "MA",
+    "WMT",
+    "JNJ",
+    "XOM",
+    "UNH",
+    "PG",
+    "HD",
+    "COST",
+    "ORCL",
+    "MRK",
+    "ABBV",
+    "BAC",
+    "KO",
+    "PEP",
+    "CVX",
+    "ADBE",
+    "CRM",
+    "NFLX",
+    "AMD",
+    "DIS",
+    "INTC",
+    "QCOM",
+    "TXN",
+    "CSCO",
+    "ACN",
+    "MCD",
+    "ABT",
+    "DHR",
+    "WFC",
+    "LIN",
+    "VZ",
+    "PM",
+    "NKE",
+    "TMO",
+    "IBM",
+    "GE",
+    "CAT",
+    "AXP",
+    "NOW",
+    "INTU",
+    "AMGN",
+    "ISRG",
+    "GS",
+    "MS",
+    "SPGI",
+    "BKNG",
+    "RTX",
+    "PFE",
+    "UBER",
+    "T",
+    "HON",
+    "LOW",
+    "BLK",
+    "ELV",
+    "PLD",
+    "AMAT",
+    "C",
+    "SBUX",
+    "BA",
+    "DE",
+    "MDT",
+    "ADP",
+    "GILD",
+    "LMT",
+    "CB",
+    "MMC",
+    "SYK",
+    "TJX",
+    "VRTX",
+    "REGN",
+    "PGR",
+    "ETN",
+    "BSX",
+    "CI",
+    "MU",
+    "SO",
+    "ZTS",
+    "FI",
+    "BX",
+    "MO",
+    "DUK",
+    "SCHW",
+    "EOG",
+    "SLB",
+    "APD",
+    "CL",
+    "ITW",
+    "PANW",
+    "WM",
+    "CME",
+    "MCK",
+    "TGT",
+    "USB",
+    "PNC",
+    "AON",
+    "GM",
+    "F",
+    "PYPL",
+    "COF",
+    "MAR",
+    "FCX",
+    "EMR",
+    "NSC",
+    "ORLY",
+    "MMM",
+    "ECL",
+    "ADSK",
+    "SPY",
+    "QQQ",
+    "IWM",
+    "DIA",
 ]
 
 
-def liquid_universe(limit: Optional[int] = None,
-                    full: bool = False) -> List[str]:
+def liquid_universe(limit: Optional[int] = None, full: bool = False) -> List[str]:
     """Return the intraday-tradeable US stock universe.
 
     Args:
@@ -86,8 +196,12 @@ def _fetch_all_us_listed() -> Optional[List[str]]:
     symbols: List[str] = []
     for url, sym_col in _NASDAQ_FEEDS:
         try:
-            resp = httpx.get(url, timeout=20.0, follow_redirects=True,
-                             headers={"User-Agent": "Mozilla/5.0 (nighttrade)"})
+            resp = httpx.get(
+                url,
+                timeout=20.0,
+                follow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0 (nighttrade)"},
+            )
             resp.raise_for_status()
             for row in csv.DictReader(io.StringIO(resp.text), delimiter="|"):
                 sym = (row.get(sym_col) or "").strip().upper()
@@ -117,13 +231,16 @@ def _fetch_sp500() -> Optional[List[str]]:
         import pandas as pd
 
         # Wikipedia 403s the default urllib agent — send a browser one.
-        resp = httpx.get(_WIKI_URL, follow_redirects=True, timeout=10.0,
-                         headers={"User-Agent": "Mozilla/5.0 (nighttrade)"})
+        resp = httpx.get(
+            _WIKI_URL,
+            follow_redirects=True,
+            timeout=10.0,
+            headers={"User-Agent": "Mozilla/5.0 (nighttrade)"},
+        )
         resp.raise_for_status()
         tables = pd.read_html(io.StringIO(resp.text))
         symbols = tables[0]["Symbol"].astype(str).tolist()
-        cleaned = [s.strip().upper().replace(".", "-") for s in symbols
-                   if s and s.strip()]
+        cleaned = [s.strip().upper().replace(".", "-") for s in symbols if s and s.strip()]
         if len(cleaned) >= 400:
             _log.info("fetched %d S&P 500 constituents", len(cleaned))
             return cleaned

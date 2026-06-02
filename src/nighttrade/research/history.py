@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 from ..models import OHLCV
 from ..runtime import get_logger
@@ -60,9 +60,15 @@ class HistoryCache:
             "SELECT * FROM bars WHERE symbol=? ORDER BY date", (symbol.upper(),)
         ).fetchall()
         return [
-            OHLCV(symbol=symbol.upper(), timestamp=r["date"], open=r["open"],
-                  high=r["high"], low=r["low"], close=r["close"],
-                  volume=r["volume"])
+            OHLCV(
+                symbol=symbol.upper(),
+                timestamp=r["date"],
+                open=r["open"],
+                high=r["high"],
+                low=r["low"],
+                close=r["close"],
+                volume=r["volume"],
+            )
             for r in rows
         ]
 
@@ -71,22 +77,29 @@ class HistoryCache:
     def store(self, symbol: str, candles: List[OHLCV]) -> int:
         """Insert (or replace) ``candles`` for ``symbol``. Returns rows written."""
         rows = [
-            (symbol.upper(), c.timestamp.date().isoformat(),
-             c.open, c.high, c.low, c.close, c.volume)
+            (
+                symbol.upper(),
+                c.timestamp.date().isoformat(),
+                c.open,
+                c.high,
+                c.low,
+                c.close,
+                c.volume,
+            )
             for c in candles
         ]
         self._conn.executemany(
             "INSERT OR REPLACE INTO bars "
             "(symbol, date, open, high, low, close, volume) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)", rows,
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rows,
         )
         self._conn.commit()
         return len(rows)
 
     # -- fetch-or-cache ------------------------------------------------------
 
-    def get(self, symbol: str, years: int = 3,
-            refresh: bool = False) -> List[OHLCV]:
+    def get(self, symbol: str, years: int = 3, refresh: bool = False) -> List[OHLCV]:
         """Return daily history for ``symbol``, downloading + caching on a miss.
 
         Args:
@@ -112,8 +125,9 @@ class HistoryCache:
             _log.warning("yfinance not installed — cannot download %s", symbol)
             return []
         try:
-            frame = yf.Ticker(symbol).history(period=f"{max(1, years)}y",
-                                              interval="1d", auto_adjust=False)
+            frame = yf.Ticker(symbol).history(
+                period=f"{max(1, years)}y", interval="1d", auto_adjust=False
+            )
         except Exception as exc:  # noqa: BLE001
             _log.warning("history download failed for %s: %s", symbol, exc)
             return []
@@ -121,21 +135,28 @@ class HistoryCache:
             return []
         candles: List[OHLCV] = []
         for ts, row in frame.dropna().iterrows():
-            o, h, l, c = (row.get("Open"), row.get("High"),
-                          row.get("Low"), row.get("Close"))
+            o, h, l, c = (row.get("Open"), row.get("High"), row.get("Low"), row.get("Close"))
             if None in (o, h, l, c) or min(o, h, l, c) <= 0:
                 continue
             try:
-                candles.append(OHLCV(
-                    symbol=symbol, timestamp=ts.to_pydatetime(),
-                    open=float(o), high=float(h), low=float(l), close=float(c),
-                    volume=float(row.get("Volume") or 0.0)))
+                candles.append(
+                    OHLCV(
+                        symbol=symbol,
+                        timestamp=ts.to_pydatetime(),
+                        open=float(o),
+                        high=float(h),
+                        low=float(l),
+                        close=float(c),
+                        volume=float(row.get("Volume") or 0.0),
+                    )
+                )
             except (ValueError, TypeError):
                 continue
         _log.info("downloaded %d daily bars for %s", len(candles), symbol)
         return candles
 
-    def get_many(self, symbols: List[str], years: int = 3,
-                 refresh: bool = False) -> Dict[str, List[OHLCV]]:
+    def get_many(
+        self, symbols: List[str], years: int = 3, refresh: bool = False
+    ) -> Dict[str, List[OHLCV]]:
         """Fetch-or-cache history for several symbols."""
         return {s: self.get(s, years=years, refresh=refresh) for s in symbols}

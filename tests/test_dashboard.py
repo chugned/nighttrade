@@ -15,9 +15,12 @@ _T0 = datetime(2026, 5, 17, 12, 0, tzinfo=timezone.utc)
 
 def _populated_db(tmp_path):
     db_path = tmp_path / "obs.db"
-    obs = Observer(load_config(load_dotenv_file=False),
-                   WatchlistConfig(symbols=["AAPL", "MSFT"]),
-                   db=ObservatoryDB(db_path), feed=LiveMockFeed())
+    obs = Observer(
+        load_config(load_dotenv_file=False),
+        WatchlistConfig(symbols=["AAPL", "MSFT"]),
+        db=ObservatoryDB(db_path),
+        feed=LiveMockFeed(),
+    )
     obs.start()
     for k in range(3):
         obs.run_once(_T0 + timedelta(minutes=20 * k))
@@ -66,8 +69,7 @@ def test_dashboard_symbol_detail(tmp_path):
 
 def test_dashboard_accuracy_paper_risk(tmp_path):
     client = TestClient(create_app(_populated_db(tmp_path)))
-    for endpoint in ("/api/accuracy", "/api/paper", "/api/risk",
-                     "/api/safety-history"):
+    for endpoint in ("/api/accuracy", "/api/paper", "/api/risk", "/api/safety-history"):
         resp = client.get(endpoint)
         assert resp.status_code == 200
         assert resp.json() is not None
@@ -83,12 +85,15 @@ def test_dashboard_empty_db_does_not_crash(tmp_path):
 
 # --- learning observatory endpoints ----------------------------------------
 
+
 def test_dashboard_ranking_endpoint(tmp_path):
     db_path = tmp_path / "rank.db"
-    obs = Observer(load_config(load_dotenv_file=False),
-                   WatchlistConfig(symbols=["AAPL", "MSFT", "NVDA", "AMZN",
-                                            "JPM", "XOM", "HD", "KO"]),
-                   db=ObservatoryDB(db_path), feed=LiveMockFeed())
+    obs = Observer(
+        load_config(load_dotenv_file=False),
+        WatchlistConfig(symbols=["AAPL", "MSFT", "NVDA", "AMZN", "JPM", "XOM", "HD", "KO"]),
+        db=ObservatoryDB(db_path),
+        feed=LiveMockFeed(),
+    )
     obs.start()
     obs.run_once(_T0)
     obs.stop()
@@ -119,16 +124,20 @@ def test_dashboard_investments_endpoint(tmp_path):
 
 def _learning_db(tmp_path):
     from nighttrade.observatory import LearningSession
+
     db_path = tmp_path / "learn.db"
     db = ObservatoryDB(db_path)
-    session = LearningSession.resume_or_create(db, target_days=30,
-                                               interval_seconds=300)
+    session = LearningSession.resume_or_create(db, target_days=30, interval_seconds=300)
     # Anchor the session start a couple of days before "now" so the learning
     # window is always at least day 2, regardless of the wall clock.
     session.start = datetime.now(timezone.utc) - timedelta(days=2)
-    obs = Observer(load_config(load_dotenv_file=False),
-                   WatchlistConfig(symbols=["AAPL", "MSFT"]),
-                   db=db, feed=LiveMockFeed(), learning_session=session)
+    obs = Observer(
+        load_config(load_dotenv_file=False),
+        WatchlistConfig(symbols=["AAPL", "MSFT"]),
+        db=db,
+        feed=LiveMockFeed(),
+        learning_session=session,
+    )
     obs.start()
     for k in range(3):
         obs.run_once(_T0 + timedelta(hours=8 * k))
@@ -140,10 +149,18 @@ def _learning_db(tmp_path):
 
 def test_dashboard_learning_endpoints(tmp_path):
     client = TestClient(create_app(_learning_db(tmp_path)))
-    for endpoint in ("/api/progress", "/api/regimes", "/api/calibration",
-                     "/api/readiness", "/api/learning", "/api/activity",
-                     "/api/status", "/api/daily-reports", "/api/predictions",
-                     "/api/paper-trades"):
+    for endpoint in (
+        "/api/progress",
+        "/api/regimes",
+        "/api/calibration",
+        "/api/readiness",
+        "/api/learning",
+        "/api/activity",
+        "/api/status",
+        "/api/daily-reports",
+        "/api/predictions",
+        "/api/paper-trades",
+    ):
         resp = client.get(endpoint)
         assert resp.status_code == 200, endpoint
         assert resp.json() is not None
@@ -177,9 +194,8 @@ def test_dashboard_gates_endpoint(tmp_path):
     """The /api/gates endpoint surfaces the four strategy gates."""
     client = TestClient(create_app(tmp_path / "obs.db"))
     body = client.get("/api/gates").json()
-    assert {g["key"] for g in body["gates"]} == {
-        "time_stop", "regime", "calibration", "meta"}
-    assert body["total_blocked"] == 0          # empty db — nothing blocked yet
+    assert {g["key"] for g in body["gates"]} == {"time_stop", "regime", "calibration", "meta"}
+    assert body["total_blocked"] == 0  # empty db — nothing blocked yet
     assert body["events"] == []
     assert "meta_min_probability" in body["thresholds"]
 
@@ -188,10 +204,10 @@ def test_dashboard_gates_records_decisions(tmp_path):
     """Recorded gate decisions show up in the endpoint, allowed and blocked."""
     db_path = tmp_path / "gates.db"
     db = ObservatoryDB(db_path)
-    db.insert_gate_event(symbol="AAPL", gate="all", allowed=True,
-                         reason="cleared regime + calibration + meta gates")
-    db.insert_gate_event(symbol="MSFT", gate="regime", allowed=False,
-                         reason="regime blocked")
+    db.insert_gate_event(
+        symbol="AAPL", gate="all", allowed=True, reason="cleared regime + calibration + meta gates"
+    )
+    db.insert_gate_event(symbol="MSFT", gate="regime", allowed=False, reason="regime blocked")
     db.close()
     body = TestClient(create_app(db_path)).get("/api/gates").json()
     assert body["total_blocked"] == 1

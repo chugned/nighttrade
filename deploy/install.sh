@@ -79,8 +79,15 @@ make_plist() {
     echo '</dict></plist>'
   } > "$plist"
   launchctl bootout "gui/$U/$label" 2>/dev/null || true
-  sleep 1
-  launchctl bootstrap "gui/$U" "$plist"
+  # Give launchd time to fully tear down the old job before bootstrapping
+  # the new one. A 1s settle raced on rapid re-deploys -> "Bootstrap
+  # failed: 5: Input/output error" (observed 2026-06-03). Retry once.
+  sleep 2
+  if ! launchctl bootstrap "gui/$U" "$plist" 2>/dev/null; then
+    sleep 3
+    launchctl bootstrap "gui/$U" "$plist" 2>/dev/null || \
+      echo "  WARN: bootstrap $label failed twice — kickstart will recover it"
+  fi
   echo "  loaded $label"
 }
 
@@ -127,6 +134,17 @@ launchctl bootout "gui/$U/$WATCHDOG_LABEL" 2>/dev/null || true
 sleep 1
 launchctl bootstrap "gui/$U" "$WATCHDOG_PLIST"
 echo "  loaded $WATCHDOG_LABEL  (fires every 300s, kicks observer + dashboard if down)"
+
+# RunAtLoad does not reliably fire on bootstrap in the gui/ domain
+# (observed 2026-06-03 — jobs loaded with the process never spawning until
+# kickstarted). Force-kick the long-running services so a bare install.sh
+# run actually starts them, not just sync.sh. Without this, an install run
+# (e.g. during deploy recovery) leaves the observer loaded-but-dead.
+sleep 1
+for svc in com.nighttrade.observer com.nighttrade.dashboard; do
+  launchctl kickstart "gui/$U/$svc" >/dev/null 2>&1 || true
+done
+echo "  kickstarted observer + dashboard"
 
 echo
 echo "Done. The observer + dashboard now run as background services."

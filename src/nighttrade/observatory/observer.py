@@ -1003,12 +1003,24 @@ class Observer:
     _BACKOFF_THRESHOLD = 3
     _BACKOFF_MAX_SECONDS = 1800
     _ABORT_THRESHOLD = 50
+    #: SCALE — observed 2026-06-02 that the observer's RSS grows ~6 MB
+    #: per cycle from yfinance + pandas internal state (NOT our code —
+    #: a known yfinance issue: session state, cookie jar, pandas
+    #: allocator retention). Python's pymalloc never returns pages to
+    #: the OS, so gc.collect alone can't shrink RSS. Mitigation: after
+    #: this many cycles, exit gracefully — launchd respawns with fresh
+    #: memory. State persists via the observatory DB.
+    #: 60 cycles × 180s interval ≈ 3 hours per restart, which keeps
+    #: RSS bounded around 600 MB peak (was climbing to 1.5 GB+ over
+    #: a working day before this gate).
+    _MAX_CYCLES_BEFORE_RESTART = 60
 
     def run_forever(self, interval: int = 300) -> None:
         """Run cycles every ``interval`` seconds.
 
-        Stops on a signal, or — in a learning session — once the configured
-        observation window (e.g. 30 days) has fully elapsed.
+        Stops on a signal, in a completed learning session, or after
+        ``_MAX_CYCLES_BEFORE_RESTART`` cycles (memory hygiene — see
+        the class constant comment).
 
         Sustained failures trigger exponential backoff after
         ``_BACKOFF_THRESHOLD`` and abort the run at
@@ -1021,6 +1033,16 @@ class Observer:
         consecutive_failures = 0
         try:
             while not self._stop:
+                # Memory-hygiene gate: bounded run length → fresh
+                # process via launchd respawn. RSS reset for free.
+                if self._cycle >= self._MAX_CYCLES_BEFORE_RESTART:
+                    _log.info(
+                        "memory-hygiene rotation: hit %d cycles, "
+                        "exiting cleanly for launchd respawn (fresh RSS)",
+                        self._cycle,
+                    )
+                    self._stop = True
+                    break
                 if self.learning_session is not None and self.learning_session.is_complete(
                     datetime.now(timezone.utc)
                 ):

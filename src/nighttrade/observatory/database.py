@@ -489,8 +489,16 @@ class ObservatoryDB:
         return self._all("SELECT * FROM predictions ORDER BY id DESC LIMIT ?",
                          (limit,))
 
-    def unevaluated_predictions(self) -> List[Dict[str, Any]]:
-        return self._all("SELECT * FROM predictions WHERE evaluated=0 ORDER BY id")
+    def unevaluated_predictions(self, limit: Optional[int] = None) -> List[Dict[str, Any]]:
+        """All predictions that haven't been evaluated yet. ``limit``
+        bounds how many are returned per call (added for parity with
+        daytrade so the same reconciliation tooling works on both)."""
+        if limit is not None and limit > 0:
+            return self._all(
+                "SELECT * FROM predictions WHERE evaluated=0 "
+                "ORDER BY id LIMIT ?", (int(limit),))
+        return self._all(
+            "SELECT * FROM predictions WHERE evaluated=0 ORDER BY id")
 
     def outcomes(self, limit: int = 500) -> List[Dict[str, Any]]:
         return self._all(

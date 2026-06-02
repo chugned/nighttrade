@@ -760,10 +760,20 @@ class Observer:
                   symbol, sizing.quantity, decision.entry)
 
     def _manage_positions(self, now: datetime) -> int:
-        """Close any open paper position whose stop or target was reached."""
+        """Close any open paper position whose stop or target was reached.
+
+        Ported from daytrade QA-CRIT-1: a yfinance hiccup in price_at
+        used to crash the entire cycle, silently skipping stop-loss
+        enforcement for every other open position. Fail-soft per-symbol.
+        """
         closed = 0
         for symbol, pos in list(self._open.items()):
-            price = self.feed.price_at(symbol, now)
+            try:
+                price = self.feed.price_at(symbol, now)
+            except Exception as exc:  # noqa: BLE001 — fail-soft per-symbol
+                _log.warning("price_at(%s) failed; skipping management "
+                             "this cycle: %s", symbol, exc)
+                continue
             exit_price: Optional[float] = None
             if price <= pos["stop"]:
                 exit_price = pos["stop"]
@@ -798,7 +808,13 @@ class Observer:
                            for t in self.db.closed_paper_trades())
         unrealized = 0.0
         for symbol, pos in self._open.items():
-            price = self.feed.price_at(symbol, now)
+            # Ported from daytrade QA-CRIT-1: fail-soft on price fetch
+            try:
+                price = self.feed.price_at(symbol, now)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("price_at(%s) failed in equity calc; using "
+                             "entry as fallback: %s", symbol, exc)
+                price = pos["entry"]
             unrealized += (price - pos["entry"]) * pos["qty"]
         return self._starting_cash + realized + unrealized
 

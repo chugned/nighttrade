@@ -91,11 +91,46 @@ def test_db_bot_run_lifecycle(tmp_path):
 
 
 def test_db_recovers_dangling_runs(tmp_path):
+    """Only runs whose PID is no longer alive should be marked crashed."""
+    import os
     db = _db(tmp_path)
-    db.start_bot_run(pid=1)  # left 'running'
+    # Use a PID guaranteed to be dead (>4M is outside default PID space).
+    dead_pid = 4_000_001
+    while True:
+        try:
+            os.kill(dead_pid, 0)
+            dead_pid += 1
+        except (ProcessLookupError, OSError):
+            break
+    db.start_bot_run(pid=dead_pid)
     crashed = db.mark_dangling_runs_crashed()
     assert crashed == 1
     assert db.current_bot_run()["status"] == "crashed"
+    db.close()
+
+
+def test_db_keeps_alive_runs_running(tmp_path):
+    """A still-alive sibling PID must NOT be marked crashed."""
+    import os
+    db = _db(tmp_path)
+    db.start_bot_run(pid=os.getpid())  # ourselves — definitely alive
+    crashed = db.mark_dangling_runs_crashed()
+    assert crashed == 0
+    assert db.current_bot_run()["status"] == "running"
+    db.close()
+
+
+def test_heartbeat_resurrects_spuriously_crashed_row(tmp_path):
+    """A wrongly-crashed row must recover on next heartbeat."""
+    db = _db(tmp_path)
+    run_id = db.start_bot_run(pid=1)
+    db.stop_bot_run(run_id, status="crashed")
+    assert db.current_bot_run()["status"] == "crashed"
+    db.heartbeat(run_id, cycles=42)
+    row = db.current_bot_run()
+    assert row["status"] == "running"
+    assert row["stopped_ts"] is None
+    assert row["cycles"] == 42
     db.close()
 
 

@@ -236,46 +236,51 @@ class Observer:
 
         assessments = []
         illiquid: List[str] = []
-        for symbol in self.watchlist_config.symbols:
-            self._set_now("Running technical analysis", symbol, now)
-            try:
-                assessment = self._observe_symbol(symbol, now, memory, recent_accuracy, equity)
-            except ValueError as exc:
-                # "no live data for X" is a data-quality issue, not a
-                # code bug. yfinance may have no intraday data for the
-                # ticker (between sessions, halted, recently delisted).
-                # Log once per cycle as a warning, don't pollute the
-                # errors table or the dashboard's red-alert counter.
-                msg = str(exc)
-                if "no live data" in msg or "no candles" in msg:
-                    if not hasattr(self, "_data_gap_logged"):
-                        self._data_gap_logged: set = set()
-                    if symbol not in self._data_gap_logged:
-                        _log.warning(
-                            "data gap for %s (%s) — skipping until " "yfinance returns data",
-                            symbol,
-                            msg,
-                        )
-                        self._data_gap_logged.add(symbol)
+        # SPEED — db.batch() defers commits across the per-symbol loop.
+        # 503 symbols × ~3 inserts each = ~1500 commits/cycle becomes 1.
+        # SQLite WAL is dramatically faster at many small inserts inside
+        # one transaction than at many small transactions.
+        with self.db.batch():
+            for symbol in self.watchlist_config.symbols:
+                self._set_now("Running technical analysis", symbol, now)
+                try:
+                    assessment = self._observe_symbol(symbol, now, memory, recent_accuracy, equity)
+                except ValueError as exc:
+                    # "no live data for X" is a data-quality issue, not a
+                    # code bug. yfinance may have no intraday data for the
+                    # ticker (between sessions, halted, recently delisted).
+                    # Log once per cycle as a warning, don't pollute the
+                    # errors table or the dashboard's red-alert counter.
+                    msg = str(exc)
+                    if "no live data" in msg or "no candles" in msg:
+                        if not hasattr(self, "_data_gap_logged"):
+                            self._data_gap_logged: set = set()
+                        if symbol not in self._data_gap_logged:
+                            _log.warning(
+                                "data gap for %s (%s) — skipping until " "yfinance returns data",
+                                symbol,
+                                msg,
+                            )
+                            self._data_gap_logged.add(symbol)
+                        continue
+                    # A different ValueError is a real bug — fall through.
+                    self.db.insert_error(f"observe:{symbol}", repr(exc))
+                    self._errors_this_cycle += 1
+                    _log.exception("error observing %s", symbol)
                     continue
-                # A different ValueError is a real bug — fall through.
-                self.db.insert_error(f"observe:{symbol}", repr(exc))
-                self._errors_this_cycle += 1
-                _log.exception("error observing %s", symbol)
-                continue
-            except Exception as exc:  # noqa: BLE001 - one symbol must not kill the cycle
-                self.db.insert_error(f"observe:{symbol}", repr(exc))
-                self._errors_this_cycle += 1
-                _log.exception("error observing %s", symbol)
-                continue
-            summary.symbols_observed += 1
-            if assessment is not None:
-                assessments.append(assessment)
-                summary.tradeable += 1
-                if assessment.condition == "ILLIQUID":
-                    illiquid.append(symbol)
-            if self._market_open:
-                summary.predictions_made += 1
+                except Exception as exc:  # noqa: BLE001 - one symbol must not kill the cycle
+                    self.db.insert_error(f"observe:{symbol}", repr(exc))
+                    self._errors_this_cycle += 1
+                    _log.exception("error observing %s", symbol)
+                    continue
+                summary.symbols_observed += 1
+                if assessment is not None:
+                    assessments.append(assessment)
+                    summary.tradeable += 1
+                    if assessment.condition == "ILLIQUID":
+                        illiquid.append(symbol)
+                if self._market_open:
+                    summary.predictions_made += 1
 
         # Cross-sectional ranking — rank the whole universe relative to itself.
         self._set_now("Ranking the universe", "", now)

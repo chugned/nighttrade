@@ -217,12 +217,32 @@ class ObservatoryDB:
     # -- bot run lifecycle ---------------------------------------------------
 
     def mark_dangling_runs_crashed(self) -> int:
-        """Any run still 'running' from a previous process is marked crashed."""
-        cur = self._conn.execute(
-            "UPDATE bot_runs SET status='crashed', stopped_ts=? "
-            "WHERE status='running'", (_now(),))
+        """Mark runs as crashed ONLY when their PID is no longer alive
+        (ported from daytrade QA-RUNS-1). Prevents a sibling bot's
+        startup from incorrectly marking the live observer as crashed.
+        """
+        import os as _os
+        rows = self._conn.execute(
+            "SELECT id, pid FROM bot_runs WHERE status='running'"
+        ).fetchall()
+        crashed = 0
+        for row_id, pid in rows:
+            alive = False
+            try:
+                if pid:
+                    _os.kill(int(pid), 0)
+                    alive = True
+            except ProcessLookupError:
+                alive = False
+            except (PermissionError, OSError):
+                alive = True
+            if not alive:
+                self._conn.execute(
+                    "UPDATE bot_runs SET status='crashed', stopped_ts=? "
+                    "WHERE id=?", (_now(), row_id))
+                crashed += 1
         self._conn.commit()
-        return cur.rowcount
+        return crashed
 
     def start_bot_run(self, pid: int) -> int:
         now = _now()
@@ -231,8 +251,12 @@ class ObservatoryDB:
             "status": "running", "pid": pid})
 
     def heartbeat(self, run_id: int, cycles: int) -> None:
+        """A heartbeat is the definitive 'I am alive' signal: also
+        restore status='running' and clear any spurious stopped_ts
+        (ported from daytrade QA-RUNS-2)."""
         self._conn.execute(
-            "UPDATE bot_runs SET last_heartbeat_ts=?, cycles=? WHERE id=?",
+            "UPDATE bot_runs SET last_heartbeat_ts=?, cycles=?, "
+            "status='running', stopped_ts=NULL WHERE id=?",
             (_now(), cycles, run_id))
         self._conn.commit()
 
@@ -415,6 +439,24 @@ class ObservatoryDB:
                          "ORDER BY id DESC LIMIT ?", (limit,))
 
     def current_bot_run(self) -> Optional[Dict[str, Any]]:
+        """Prefer a row whose status='running' AND PID is alive (ported
+        from daytrade QA-RUNS-3). A short-lived sibling test process
+        no longer pushes the actually-running bot off the dashboard."""
+        import os as _os
+        for row in self._conn.execute(
+                "SELECT * FROM bot_runs WHERE status='running' "
+                "ORDER BY id DESC LIMIT 5").fetchall():
+            d = dict(row)
+            pid = d.get("pid")
+            if not pid:
+                continue
+            try:
+                _os.kill(int(pid), 0)
+                return d
+            except (ProcessLookupError, ValueError, TypeError):
+                continue
+            except (PermissionError, OSError):
+                return d
         return self._one("SELECT * FROM bot_runs ORDER BY id DESC LIMIT 1")
 
     def recent_errors(self, limit: int = 50) -> List[Dict[str, Any]]:

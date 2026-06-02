@@ -682,12 +682,16 @@ class Observer:
 
     def _set_now(self, step: str, symbol: str, now: datetime,
                  done: bool = False) -> None:
-        """Write the live 'what is it doing right now' state to data/now.json."""
+        """Write the live 'what is it doing right now' state to data/now.json.
+
+        Ported from daytrade QA-HIGH-4: atomic write via tempfile +
+        os.replace so a dashboard reader never sees a truncated JSON.
+        """
         try:
             next_cycle = (now + timedelta(seconds=self._interval)).isoformat() \
                 if done else None
             _NOW_PATH.parent.mkdir(parents=True, exist_ok=True)
-            _NOW_PATH.write_text(json.dumps({
+            payload = json.dumps({
                 "cycle": self._cycle,
                 "started_at": now.isoformat(),
                 "current_step": step,
@@ -695,7 +699,10 @@ class Observer:
                 "next_cycle_at": next_cycle,
                 "errors_this_cycle": getattr(self, "_errors_this_cycle", 0),
                 "steps": CYCLE_STEPS,
-            }), encoding="utf-8")
+            })
+            tmp = _NOW_PATH.with_suffix(".json.tmp")
+            tmp.write_text(payload, encoding="utf-8")
+            os.replace(tmp, _NOW_PATH)
         except OSError:  # pragma: no cover
             pass
 
@@ -803,11 +810,22 @@ class Observer:
 
     # -- the forever loop ----------------------------------------------------
 
+    #: Ported from daytrade QA-CRIT-4 — backoff + abort thresholds for
+    #: consecutive cycle failures.
+    _BACKOFF_THRESHOLD = 3
+    _BACKOFF_MAX_SECONDS = 1800
+    _ABORT_THRESHOLD = 50
+
     def run_forever(self, interval: int = 300) -> None:
         """Run cycles every ``interval`` seconds.
 
         Stops on a signal, or — in a learning session — once the configured
         observation window (e.g. 30 days) has fully elapsed.
+
+        Sustained failures trigger exponential backoff after
+        ``_BACKOFF_THRESHOLD`` and abort the run at
+        ``_ABORT_THRESHOLD`` — preventing a permafail loop from
+        hammering the data feed.
         """
         self._install_signal_handlers()
         self._interval = interval
@@ -833,10 +851,27 @@ class Observer:
                         LEVEL_CRITICAL, "crash",
                         f"observer cycle crashed: {exc!r}",
                         datetime.now(timezone.utc)))
-                # Sleep in short slices so Ctrl+C is responsive.
+                    if consecutive_failures >= self._ABORT_THRESHOLD:
+                        _log.error(
+                            "%d consecutive cycle failures — aborting; "
+                            "watchdog can restart cleanly",
+                            consecutive_failures)
+                        self._stop = True
+                        break
+                extra_sleep = 0.0
+                if consecutive_failures > self._BACKOFF_THRESHOLD:
+                    n = consecutive_failures - self._BACKOFF_THRESHOLD
+                    extra_sleep = min(
+                        self._BACKOFF_MAX_SECONDS,
+                        interval * (2 ** min(n, 10)),
+                    )
+                    _log.warning("backoff: extra %.0f s sleep "
+                                 "(consecutive failures = %d)",
+                                 extra_sleep, consecutive_failures)
                 slept = 0.0
-                while slept < interval and not self._stop:
-                    time.sleep(min(1.0, interval - slept))
+                total = interval + extra_sleep
+                while slept < total and not self._stop:
+                    time.sleep(min(1.0, total - slept))
                     slept += 1.0
         finally:
             final = "completed" if getattr(self, "_learning_complete", False) \

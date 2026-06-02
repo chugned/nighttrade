@@ -55,14 +55,15 @@ def test_max_workers_capped_at_eight():
     assert YFinanceFeed._MAX_FETCH_WORKERS <= 8
 
 
-def test_each_chunk_passes_threads_false(monkeypatch):
+def test_each_chunk_passes_threads_false(monkeypatch, tmp_path):
     """Every chunk MUST be threads=False — otherwise we're double-
     parallelising (our pool × yfinance's per-ticker threads)."""
     from nighttrade.observatory.live_feed import YFinanceFeed
     captured: dict = {}
     _install_fake_yfinance(monkeypatch, captured)
     syms = [f"S{i:03d}" for i in range(20)]
-    feed = YFinanceFeed(symbols=syms, refresh_seconds=120.0)
+    feed = YFinanceFeed(symbols=syms, refresh_seconds=120.0,
+                          park_state_path=tmp_path / "park.json")
     feed._refresh()
     assert "calls" in captured
     for c in captured["calls"]:
@@ -72,12 +73,13 @@ def test_each_chunk_passes_threads_false(monkeypatch):
         )
 
 
-def test_chunks_cover_every_symbol_exactly_once(monkeypatch):
+def test_chunks_cover_every_symbol_exactly_once(monkeypatch, tmp_path):
     from nighttrade.observatory.live_feed import YFinanceFeed
     captured: dict = {}
     _install_fake_yfinance(monkeypatch, captured)
     syms = [f"S{i:03d}" for i in range(50)]
-    feed = YFinanceFeed(symbols=syms, refresh_seconds=120.0)
+    feed = YFinanceFeed(symbols=syms, refresh_seconds=120.0,
+                          park_state_path=tmp_path / "park.json")
     feed._refresh()
     fetched = []
     for c in captured["calls"]:
@@ -85,30 +87,32 @@ def test_chunks_cover_every_symbol_exactly_once(monkeypatch):
     assert sorted(fetched) == sorted(syms)
 
 
-def test_chunk_count_respects_worker_cap(monkeypatch):
+def test_chunk_count_respects_worker_cap(monkeypatch, tmp_path):
     """503 → exactly 8 chunks (one per worker, ~63 syms each)."""
     from nighttrade.observatory.live_feed import YFinanceFeed
     captured: dict = {}
     _install_fake_yfinance(monkeypatch, captured)
     syms = [f"S{i:04d}" for i in range(503)]
-    feed = YFinanceFeed(symbols=syms, refresh_seconds=120.0)
+    feed = YFinanceFeed(symbols=syms, refresh_seconds=120.0,
+                          park_state_path=tmp_path / "park.json")
     feed._refresh()
     n_chunks = len(captured.get("calls", []))
     assert n_chunks == YFinanceFeed._MAX_FETCH_WORKERS
 
 
-def test_small_universe_does_not_overshoot_worker_count(monkeypatch):
+def test_small_universe_does_not_overshoot_worker_count(monkeypatch, tmp_path):
     """3 symbols → at most 3 chunks (not 8 with empty chunks)."""
     from nighttrade.observatory.live_feed import YFinanceFeed
     captured: dict = {}
     _install_fake_yfinance(monkeypatch, captured)
     syms = ["A", "B", "C"]
-    feed = YFinanceFeed(symbols=syms, refresh_seconds=120.0)
+    feed = YFinanceFeed(symbols=syms, refresh_seconds=120.0,
+                          park_state_path=tmp_path / "park.json")
     feed._refresh()
     assert len(captured.get("calls", [])) <= len(syms)
 
 
-def test_chunks_run_concurrently_not_serially(monkeypatch):
+def test_chunks_run_concurrently_not_serially(monkeypatch, tmp_path):
     """Barrier-synchronised proof of parallelism. 8 chunks × 50ms each
     should complete in ~100ms (parallel), not 400ms+ (serial)."""
     from nighttrade.observatory.live_feed import YFinanceFeed
@@ -135,7 +139,8 @@ def test_chunks_run_concurrently_not_serially(monkeypatch):
     monkeypatch.setitem(sys.modules, "yfinance", fake)
 
     syms = [f"S{i:03d}" for i in range(64)]
-    feed = YFinanceFeed(symbols=syms, refresh_seconds=120.0)
+    feed = YFinanceFeed(symbols=syms, refresh_seconds=120.0,
+                          park_state_path=tmp_path / "park.json")
     t0 = time.monotonic()
     feed._refresh()
     elapsed = time.monotonic() - t0

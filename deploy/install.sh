@@ -100,6 +100,34 @@ make_plist com.nighttrade.dashboard \
   --throttle 120 \
   "$PY" -m nighttrade dashboard --host 0.0.0.0 --port "$PORT"
 
+# Periodic watchdog — different semantics from observer/dashboard so it
+# can't use make_plist (which sets KeepAlive=true). This one uses
+# StartInterval=300 so launchd fires it every 5 minutes; the script
+# itself exits quickly each run after doing its health check.
+WATCHDOG_LABEL="com.nighttrade.watchdog"
+WATCHDOG_PLIST="$AGENTS/$WATCHDOG_LABEL.plist"
+{
+  echo '<?xml version="1.0" encoding="UTF-8"?>'
+  echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"' \
+       '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+  echo '<plist version="1.0"><dict>'
+  echo "  <key>Label</key><string>$WATCHDOG_LABEL</string>"
+  echo '  <key>ProgramArguments</key><array>'
+  echo '    <string>/bin/bash</string>'
+  echo "    <string>$REPO/deploy/watchdog.sh</string>"
+  echo '  </array>'
+  echo "  <key>WorkingDirectory</key><string>$REPO</string>"
+  echo '  <key>RunAtLoad</key><true/>'
+  echo '  <key>StartInterval</key><integer>300</integer>'
+  echo "  <key>StandardOutPath</key><string>$REPO/logs/$WATCHDOG_LABEL.out.log</string>"
+  echo "  <key>StandardErrorPath</key><string>$REPO/logs/$WATCHDOG_LABEL.err.log</string>"
+  echo '</dict></plist>'
+} > "$WATCHDOG_PLIST"
+launchctl bootout "gui/$U/$WATCHDOG_LABEL" 2>/dev/null || true
+sleep 1
+launchctl bootstrap "gui/$U" "$WATCHDOG_PLIST"
+echo "  loaded $WATCHDOG_LABEL  (fires every 300s, kicks observer + dashboard if down)"
+
 echo
 echo "Done. The observer + dashboard now run as background services."
 TS_BIN="$(command -v tailscale 2>/dev/null || echo /usr/local/bin/tailscale)"

@@ -53,3 +53,36 @@ ran cycle 1 + cycle 2 without thread-related crashes, RAM stayed at
 The earlier launchd `KeepAlive=true` machinery is preserved: if a
 *different* yfinance failure occurs (network, throttling), launchd
 will still restart the observer after the `ThrottleInterval`.
+
+## 2026-06-02 second amendment — we own the parallel pool (chunked fetch)
+
+`threads=False` was bulletproof but ~110s sequential for 503 symbols.
+That's the dominant cost of every cycle. Profile:
+
+| Approach | 100 syms | Extrapolated 503 |
+| --- | ---: | ---: |
+| `threads=False`, 1 batch (sequential) | 21.8s | ~110s |
+| 8 chunks × `threads=False`, parallel via OUR pool | 5.5s | **~28s** |
+
+The unsafe path is `yf.download(503_syms, threads=N)` which lets
+yfinance spawn N OS threads PER-CALL (we observed it spawn many
+more under load). The SAFE path: split into N chunks, run each
+chunk single-threaded (threads=False), parallelise via our OWN
+`ThreadPoolExecutor(max_workers=N)`. Total OS threads = N exactly.
+
+Implementation in `YFinanceFeed._refresh`:
+- Split `self._symbols` into `_MAX_FETCH_WORKERS` chunks (currently 8).
+- Each worker calls `yf.download(chunk, threads=False)` and slices
+  per-symbol DataFrames out of the MultiIndex result.
+- Workers return `Dict[str, DataFrame]`; main thread merges.
+
+Tests pin:
+- `_MAX_FETCH_WORKERS <= 8` (the load-bearing safety invariant).
+- Every chunk call has `threads=False` (no double-parallelism).
+- Chunks cover every symbol exactly once.
+- 503 syms → exactly 8 chunks (one per worker).
+- Small universes don't overshoot the chunk count.
+- Actual parallelism via a barrier-synchronised fake.
+
+Expected impact: cycle time on nighttrade drops from ~480s to
+~400s (fetch portion of cycle: 110s → 28s, savings ~80s).

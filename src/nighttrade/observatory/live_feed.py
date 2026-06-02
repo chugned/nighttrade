@@ -94,6 +94,19 @@ class YFinanceFeed:
     #: yfinance if a longer history is genuinely needed.
     _MAX_CACHED_BARS_PER_SYMBOL = 500
 
+    #: SPEED — bounded-parallel fetch. We split the symbol universe
+    #: into N chunks and call yf.download(chunk, threads=False) from
+    #: a ThreadPoolExecutor we own. yfinance's own threads kwarg
+    #: spawned one OS thread per ticker (503 → host thread-budget
+    #: blew up — see ADR-0005). Owning the pool ourselves gives a
+    #: hard cap on the OS-thread count regardless of universe size.
+    #:
+    #: 8 workers on 503 symbols → 8 chunks of ~63 → ~28s wall-clock
+    #: (vs ~110s sequential, measured 2026-06-02). The cap of 8
+    #: stays well inside the host thread budget and matches what
+    #: was found safe in benchmarks.
+    _MAX_FETCH_WORKERS = 8
+
     def _refresh(self) -> None:
         try:
             import yfinance as yf
@@ -102,34 +115,68 @@ class YFinanceFeed:
                 "yfinance not installed — run: pip install nighttrade[online]"
             ) from exc
         import gc  # noqa: PLC0415
+        from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
 
         self._eur_per_usd = self._fetch_eur_per_usd()
+        n_syms = len(self._symbols)
+        n_workers = min(self._MAX_FETCH_WORKERS, max(1, n_syms))
         _log.info(
-            "fetching live intraday data for %d symbols (EUR/USD x%.4f)",
-            len(self._symbols),
-            self._eur_per_usd,
+            "fetching live intraday data for %d symbols in %d parallel chunks "
+            "(EUR/USD x%.4f)",
+            n_syms, n_workers, self._eur_per_usd,
         )
-        # NT-CRASH fix (revised, see ADR-0005): yfinance.threads=True
-        # spawns one OS thread per ticker (503 for S&P 500). Even
-        # threads=8 can crash under modest concurrent thread pressure —
-        # macOS ulimit -u is ~2800 and a busy host easily eats most of
-        # that. Sequential fetch is bulletproof: ~90s vs ~40s, well
-        # under the 300s cycle interval.
-        data = yf.download(
-            self._symbols,
-            period=self._period,
-            interval="1m",
-            group_by="ticker",
-            threads=False,
-            progress=False,
-            auto_adjust=False,
-        )
+
+        # Split into n_workers chunks. Each worker calls yf.download
+        # with threads=False (single-thread per worker), so total OS
+        # threads = n_workers ≤ _MAX_FETCH_WORKERS regardless of how
+        # large the universe grows.
+        chunk_size = max(1, (n_syms + n_workers - 1) // n_workers)
+        chunks = [self._symbols[i:i + chunk_size]
+                  for i in range(0, n_syms, chunk_size)]
+
+        def _fetch_chunk(chunk: List[str]) -> Dict[str, "object"]:
+            """Fetch one chunk, return per-symbol DataFrames as a dict.
+            Single-thread inside (threads=False) — concurrency comes from
+            the outer ThreadPoolExecutor, NOT from yfinance."""
+            try:
+                frame = yf.download(
+                    chunk,
+                    period=self._period,
+                    interval="1m",
+                    group_by="ticker",
+                    threads=False,
+                    progress=False,
+                    auto_adjust=False,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("chunk fetch failed (%d syms): %s",
+                             len(chunk), exc)
+                return {}
+            # Slice per-symbol out of the chunk frame here (inside the
+            # worker) so the outer code never sees the MultiIndex.
+            out: Dict[str, "object"] = {}
+            for sym in chunk:
+                try:
+                    out[sym] = frame[sym] if len(chunk) > 1 else frame
+                except (KeyError, TypeError):
+                    continue
+            return out
+
+        with ThreadPoolExecutor(
+            max_workers=n_workers, thread_name_prefix="yf-fetch"
+        ) as exe:
+            chunk_results = list(exe.map(_fetch_chunk, chunks))
+
+        # Merge the per-chunk dicts — each chunk owns disjoint symbols.
+        per_symbol_frames: Dict[str, "object"] = {}
+        for d in chunk_results:
+            per_symbol_frames.update(d)
+
         cache: Dict[str, List[OHLCV]] = {}
         cap = self._MAX_CACHED_BARS_PER_SYMBOL
         for sym in self._symbols:
-            try:
-                frame = data[sym] if len(self._symbols) > 1 else data
-            except (KeyError, TypeError):
+            frame = per_symbol_frames.get(sym)
+            if frame is None:
                 continue
             candles = self._frame_to_candles(sym, frame)
             if len(candles) >= 30:  # need enough tape for the analysis layers
@@ -154,7 +201,8 @@ class YFinanceFeed:
         # leaves DataFrame objects on the GC queue; an explicit collect
         # after each refresh keeps RSS flat instead of climbing 200+
         # MB/day. Cheap (~10ms) compared to the 40s refresh itself.
-        del data
+        del per_symbol_frames
+        del chunk_results
         gc.collect()
 
     @staticmethod

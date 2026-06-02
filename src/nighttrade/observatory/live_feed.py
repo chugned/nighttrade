@@ -94,8 +94,13 @@ class YFinanceFeed:
         self._eur_per_usd = self._fetch_eur_per_usd()
         _log.info("fetching live intraday data for %d symbols (EUR/USD x%.4f)",
                   len(self._symbols), self._eur_per_usd)
+        # NT-CRASH fix: yfinance with threads=True spawns one thread per
+        # ticker (503 for S&P 500). macOS rejects that many concurrent
+        # threads with "RuntimeError: can't start new thread", crashing
+        # the bot at startup. Cap concurrency at 8 — gives most of the
+        # speedup with no risk of exhausting the OS thread limit.
         data = yf.download(self._symbols, period=self._period, interval="1m",
-                           group_by="ticker", threads=True, progress=False,
+                           group_by="ticker", threads=8, progress=False,
                            auto_adjust=False)
         cache: Dict[str, List[OHLCV]] = {}
         cap = self._MAX_CACHED_BARS_PER_SYMBOL

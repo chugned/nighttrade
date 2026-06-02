@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from ..observatory.database import DEFAULT_DB_PATH
 from ..runtime import get_logger
 from .data import DashboardData
+from .tailnet_middleware import TailnetOnlyMiddleware
 
 _log = get_logger("dashboard")
 _STATIC = Path(__file__).resolve().parent / "static"
@@ -28,6 +29,10 @@ _STATIC = Path(__file__).resolve().parent / "static"
 def create_app(db_path: Path | str = DEFAULT_DB_PATH) -> FastAPI:
     """Build the dashboard FastAPI application bound to ``db_path``."""
     app = FastAPI(title="nighttrade — Market Safety Observatory", docs_url="/api/docs")
+    # Replaces the previous "bind to Tailscale IP" access control. Bind is
+    # now 0.0.0.0 (resilient to Tailscale flaps); access control happens
+    # per-request here. See tailnet_middleware.py + 2026-06-02 incident.
+    app.add_middleware(TailnetOnlyMiddleware)
 
     def data() -> DashboardData:
         return DashboardData(db_path)

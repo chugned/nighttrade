@@ -51,7 +51,13 @@ pkill -f 'nighttrade dashboard' 2>/dev/null || true
 sleep 1
 
 make_plist() {
+  # Usage: make_plist <label> [--throttle SECONDS] <cmd...>
   local label="$1"; shift
+  local throttle=20
+  if [ "${1:-}" = "--throttle" ]; then
+    throttle="$2"
+    shift 2
+  fi
   local plist="$AGENTS/$label.plist"
   {
     echo '<?xml version="1.0" encoding="UTF-8"?>'
@@ -67,7 +73,7 @@ make_plist() {
     echo "  <key>WorkingDirectory</key><string>$REPO</string>"
     echo '  <key>RunAtLoad</key><true/>'
     echo '  <key>KeepAlive</key><true/>'
-    echo '  <key>ThrottleInterval</key><integer>20</integer>'
+    echo "  <key>ThrottleInterval</key><integer>$throttle</integer>"
     echo "  <key>StandardOutPath</key><string>$REPO/logs/$label.out.log</string>"
     echo "  <key>StandardErrorPath</key><string>$REPO/logs/$label.err.log</string>"
     echo '</dict></plist>'
@@ -83,22 +89,26 @@ make_plist() {
 make_plist com.nighttrade.observer \
   /usr/bin/caffeinate -s "$PY" -m nighttrade observe --live --interval 300
 
-# Bind the dashboard to the Tailscale interface only — reachable from your
-# tailnet but NOT from the local Wi-Fi / LAN. Falls back to all interfaces
-# when Tailscale is not detected.
-TS_BIN="$(command -v tailscale 2>/dev/null || echo /usr/local/bin/tailscale)"
-TS_IP="$("$TS_BIN" ip -4 2>/dev/null | head -1 || true)"
-DASH_HOST="${TS_IP:-0.0.0.0}"
-
+# Dashboard binds to 0.0.0.0 (always-bindable) and enforces tailnet-only
+# access at the application layer via TailnetOnlyMiddleware. Previously
+# this script wired the Tailscale IP directly into --host, which coupled
+# service liveness to Tailscale interface state — a momentary flap during
+# deploy/sync.sh (observed 2026-06-02) parked the service in launchd
+# throttle backoff. ThrottleInterval bumped to 120s for the same reason:
+# gives any transient network reshape room to settle before launchd gives up.
 make_plist com.nighttrade.dashboard \
-  "$PY" -m nighttrade dashboard --host "$DASH_HOST" --port "$PORT"
+  --throttle 120 \
+  "$PY" -m nighttrade dashboard --host 0.0.0.0 --port "$PORT"
 
 echo
 echo "Done. The observer + dashboard now run as background services."
+TS_BIN="$(command -v tailscale 2>/dev/null || echo /usr/local/bin/tailscale)"
+TS_IP="$("$TS_BIN" ip -4 2>/dev/null | head -1 || true)"
 if [ -n "$TS_IP" ]; then
-  echo "  dashboard : bound to Tailscale only ($TS_IP:$PORT) — tailnet devices, not the LAN"
+  echo "  dashboard : bound to 0.0.0.0:$PORT, tailnet-only access enforced by middleware"
+  echo "              reachable from tailnet at $TS_IP:$PORT"
 else
-  echo "  dashboard : bound to 0.0.0.0:$PORT (Tailscale not detected)"
+  echo "  dashboard : bound to 0.0.0.0:$PORT (Tailscale not detected — local only via middleware)"
 fi
 echo "  logs      : $REPO/logs/com.nighttrade.*.log"
 echo "  manage    : launchctl list | grep nighttrade"

@@ -126,3 +126,20 @@ Key properties:
   mock-feed-always-on / sleep-cap / loop-skips-run_once).
 - ADR-0005 — yfinance RSS growth + memory rotation (the cost this
   change largely sidesteps).
+
+## Addendum (2026-06-03): lean startup — overnight RSS 665 MB → 176 MB
+
+The first cut of this ADR stopped CPU work while closed but NOT memory:
+the CLI still did its eager 503-symbol warm at startup, pinning ~665 MB
+RSS for the whole overnight sleep (Python never returns the allocation to
+the OS — same root cause as the memory-rotation gate). Observed live on
+the Polaris dashboard: a "sleeping" bot holding 665 MB.
+
+Fix: `market_hours.should_warm_now()` gates the eager warm. The `observe`
+CLI now warms the full universe up front only when the market is open or
+within the pre-open window; booting into a closed market starts lean
+(watchlist = full universe, no fetch) and the pre-open warm-up cycle does
+the first real fetch on demand (`candles_at` → `_ensure_fresh`). Verified
+live: lean startup logged, RSS = 176 MB (was 665 MB), bot still sleeping
+and fully ready for the pre-open warm-up. Tests:
+`test_market_hours_warm_decision.py`.

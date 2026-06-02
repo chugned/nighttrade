@@ -20,7 +20,8 @@ import os
 import signal
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -33,7 +34,7 @@ from ..gates import (
     MetaModel,
     RegimeGate,
 )
-from ..market_hours import is_market_open
+from ..market_hours import MarketSession, is_market_open, next_market_open, session_at
 from ..models import Action, Side
 from ..pipeline import AnalysisPipeline
 from ..risk import RiskEngine, position_size
@@ -152,6 +153,10 @@ class Observer:
         self._stop = False
         self._interval = 300
         self._last_day: Optional[str] = None
+        # ET date of the most-recent open we ran a warm-up cycle for.
+        # Used by ``_next_action`` to ensure exactly one warm-up cycle
+        # per trading day during the pre-open window.
+        self._warmup_done_for: Optional[date] = None
         self._starting_cash = config.paper.starting_cash
         # symbol -> open paper position {trade_id, qty, entry, stop, target}
         self._open: Dict[str, Dict[str, float]] = {}
@@ -851,6 +856,37 @@ class Observer:
         except OSError:  # pragma: no cover
             pass
 
+    def _set_now_sleeping(self, now: datetime) -> None:
+        """Write a 'market closed — sleeping' status to now.json (ADR-0007).
+
+        During the closed-market idle the cycle loop is skipped entirely, so
+        the normal ``_set_now`` steps never run. Without this, the dashboard
+        "Now" panel would freeze on the last pre-sleep step and read as a
+        stall. This makes the idle explicit and shows the next open time.
+        """
+        try:
+            et = ZoneInfo("America/New_York")
+            nxt = next_market_open(now).astimezone(et)
+            step = f"Sleeping — market closed until {nxt.strftime('%a %H:%M %Z')}"
+            _NOW_PATH.parent.mkdir(parents=True, exist_ok=True)
+            payload = json.dumps(
+                {
+                    "cycle": self._cycle,
+                    "started_at": now.isoformat(),
+                    "current_step": step,
+                    "current_symbol": "",
+                    "next_cycle_at": nxt.astimezone(timezone.utc).isoformat(),
+                    "errors_this_cycle": 0,
+                    "sleeping": True,
+                    "steps": CYCLE_STEPS,
+                }
+            )
+            tmp = _NOW_PATH.with_suffix(".json.tmp")
+            tmp.write_text(payload, encoding="utf-8")
+            os.replace(tmp, _NOW_PATH)
+        except OSError:  # pragma: no cover
+            pass
+
     # -- paper trading -------------------------------------------------------
 
     def _maybe_open_position(
@@ -1015,6 +1051,62 @@ class Observer:
     #: a working day before this gate).
     _MAX_CYCLES_BEFORE_RESTART = 60
 
+    #: Market-hours-aware idle (ADR-0007). When the feed reports it
+    #: respects market hours, the loop sleeps outside the regular
+    #: session and runs ONE warm-up cycle in the ``_PRE_OPEN_WARMUP_MIN``
+    #: minutes before the open so the model is ready at 09:30 ET.
+    #: Far-from-open sleeps are capped at ``_CLOSED_SLEEP_S`` so the
+    #: loop wakes periodically to re-check (and SIGTERM is honored
+    #: within minutes, not hours). Heartbeats continue during sleep
+    #: so mission control reads "intentionally idle", not "crashed".
+    _PRE_OPEN_WARMUP_MIN = 30
+    _CLOSED_SLEEP_S = 300       # 5 min between wake-ups while closed
+    _SLEEP_CHUNK_S = 30         # chunked time.sleep, also heartbeat cadence
+
+    def _next_action(self, now: datetime) -> tuple[str, int]:
+        """Decide what the outer loop should do at ``now``.
+
+        Returns ``(action, sleep_s)`` where action is one of:
+
+          * ``"observe"`` — run a normal cycle (market is open, or feed
+                            doesn't respect market hours).
+          * ``"warmup"``  — run a warm-up cycle (pre-open window AND
+                            today's warm-up has not yet run).
+          * ``"sleep"``   — skip the cycle, sleep ``sleep_s`` seconds.
+
+        ``sleep_s`` is only meaningful when action is ``"sleep"`` and is
+        always positive and capped at ``_CLOSED_SLEEP_S``.
+        """
+        feed_is_live = getattr(self.feed, "respects_market_hours", False)
+        if not feed_is_live:
+            # Mock / dev feed: preserve existing always-on behaviour.
+            return ("observe", 0)
+
+        if session_at(now) is MarketSession.REGULAR:
+            return ("observe", 0)
+
+        et_zone = ZoneInfo("America/New_York")
+        nxt_open = next_market_open(now)
+        seconds_to_open = (nxt_open - now.astimezone(timezone.utc)).total_seconds()
+        in_warmup_window = 0 < seconds_to_open <= self._PRE_OPEN_WARMUP_MIN * 60
+        open_et_date = nxt_open.astimezone(et_zone).date()
+
+        if in_warmup_window and self._warmup_done_for != open_et_date:
+            return ("warmup", 0)
+
+        # Sleep. Wake at the earlier of: warm-up window start, open
+        # itself, or one ``_CLOSED_SLEEP_S`` heartbeat tick.
+        if in_warmup_window:
+            # Already warmed up; just wait for the open.
+            sleep_s = max(1, int(seconds_to_open))
+        else:
+            sleep_s = min(
+                int(seconds_to_open - self._PRE_OPEN_WARMUP_MIN * 60),
+                self._CLOSED_SLEEP_S,
+            )
+            sleep_s = max(1, sleep_s)
+        return ("sleep", min(sleep_s, self._CLOSED_SLEEP_S))
+
     def run_forever(self, interval: int = 300) -> None:
         """Run cycles every ``interval`` seconds.
 
@@ -1049,6 +1141,42 @@ class Observer:
                     _log.info("learning window complete — stopping observer")
                     self._learning_complete = True
                     break
+
+                # ADR-0007 market-hours-aware idle. Skips the per-symbol
+                # data-fetch + ML inference work outside the regular
+                # session, runs one warm-up cycle 30 min before the open.
+                now_utc = datetime.now(timezone.utc)
+                action, sleep_s = self._next_action(now_utc)
+                if action == "sleep":
+                    # Tell the dashboards this is intentional idle, not a
+                    # stall: write now.json once on entry so the "Now" panel
+                    # reads "Sleeping — market closed until <open ET>".
+                    self._set_now_sleeping(now_utc)
+                    slept = 0
+                    while slept < sleep_s and not self._stop:
+                        chunk = min(self._SLEEP_CHUNK_S, sleep_s - slept)
+                        time.sleep(chunk)
+                        slept += chunk
+                        if self._run_id is not None:
+                            # Keep mission control on "intentionally idle"
+                            # rather than "not responding". Swallow any
+                            # transient DB error during sleep.
+                            try:
+                                self.db.heartbeat(self._run_id, self._cycle)
+                            except Exception:  # noqa: BLE001
+                                pass
+                    continue
+                if action == "warmup":
+                    et_zone = ZoneInfo("America/New_York")
+                    self._warmup_done_for = (
+                        next_market_open(now_utc).astimezone(et_zone).date()
+                    )
+                    _log.info(
+                        "market-hours: running pre-open warm-up cycle "
+                        "(open in <%d min)",
+                        self._PRE_OPEN_WARMUP_MIN,
+                    )
+
                 # SPEED FIX (mirrors daytrade): cycle period is now ``interval``
                 # wall-clock seconds (was: ``interval`` extra sleep AFTER work,
                 # which made actual cycle = work_time + interval — silently

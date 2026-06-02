@@ -202,6 +202,9 @@ class Observer:
         self._cycle += 1
         self._errors_this_cycle = 0
         self._cycle_factors = []  # cross-sectional factors, filled per symbol
+        # Reset the per-cycle data-gap dedupe set so a symbol that recovers
+        # gets re-noticed (logged once) and re-included in the next cycle.
+        self._data_gap_logged: set = set()
 
         # A live (real-data) feed only has a market when the market is open.
         # When it is closed the observer still observes — safety, regimes,
@@ -231,6 +234,27 @@ class Observer:
             try:
                 assessment = self._observe_symbol(symbol, now, memory,
                                                   recent_accuracy, equity)
+            except ValueError as exc:
+                # "no live data for X" is a data-quality issue, not a
+                # code bug. yfinance may have no intraday data for the
+                # ticker (between sessions, halted, recently delisted).
+                # Log once per cycle as a warning, don't pollute the
+                # errors table or the dashboard's red-alert counter.
+                msg = str(exc)
+                if "no live data" in msg or "no candles" in msg:
+                    if not hasattr(self, "_data_gap_logged"):
+                        self._data_gap_logged: set = set()
+                    if symbol not in self._data_gap_logged:
+                        _log.warning(
+                            "data gap for %s (%s) — skipping until "
+                            "yfinance returns data", symbol, msg)
+                        self._data_gap_logged.add(symbol)
+                    continue
+                # A different ValueError is a real bug — fall through.
+                self.db.insert_error(f"observe:{symbol}", repr(exc))
+                self._errors_this_cycle += 1
+                _log.exception("error observing %s", symbol)
+                continue
             except Exception as exc:  # noqa: BLE001 - one symbol must not kill the cycle
                 self.db.insert_error(f"observe:{symbol}", repr(exc))
                 self._errors_this_cycle += 1

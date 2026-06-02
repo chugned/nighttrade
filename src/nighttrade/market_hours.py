@@ -137,6 +137,25 @@ def next_market_open(when: Optional[datetime] = None) -> datetime:
     raise RuntimeError("no market open found within 10 days")  # pragma: no cover
 
 
+def should_warm_now(when: Optional[datetime] = None, warmup_minutes: int = 30) -> bool:
+    """Whether the live observer should eagerly warm the full symbol universe
+    at startup (ADR-0007 follow-up).
+
+    Warming = fetching every S&P 500 symbol up front. That is worth doing
+    only when the data is about to be used: during the REGULAR session, or
+    within ``warmup_minutes`` before the next open. Booting into a closed
+    market and warming anyway wastes a minute of network and pins ~665 MB
+    RSS for the whole overnight sleep (Python does not return the
+    allocation to the OS). When this returns ``False`` the CLI starts lean
+    and the observer's pre-open warm-up cycle fetches when actually needed.
+    """
+    et = _to_et(when)
+    if session_at(et) is MarketSession.REGULAR:
+        return True
+    seconds_to_open = (next_market_open(et) - et.astimezone(timezone.utc)).total_seconds()
+    return 0 < seconds_to_open <= warmup_minutes * 60
+
+
 def describe(when: Optional[datetime] = None) -> str:
     """A short human-readable description of the current market state."""
     et = _to_et(when)

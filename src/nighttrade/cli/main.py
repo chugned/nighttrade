@@ -604,29 +604,50 @@ def observe(
 
     if live:
         from ..config.schema import WatchlistConfig
+        from ..market_hours import describe, should_warm_now
         from ..observatory import YFinanceFeed
         from ..watchlist import liquid_universe
 
         universe = liquid_universe(limit=max_symbols)
-        _console.print(
-            f"Live mode: fetching real intraday data for "
-            f"{len(universe)} S&P 500 stocks "
-            f"[dim](first download takes a minute)…[/dim]"
-        )
         feed = YFinanceFeed(universe)
-        feed.refresh_now()
-        available = feed.available_symbols()
-        if not available:
+
+        # ADR-0007 follow-up: only do the eager 503-symbol warm when the
+        # data is about to be used (market open, or within the pre-open
+        # window). Booting into a closed market and warming anyway pins
+        # ~665 MB RSS for the whole overnight sleep — Python never returns
+        # the allocation to the OS. When closed we start LEAN (~180 MB);
+        # the observer's pre-open warm-up cycle fetches on first access
+        # (candles_at -> _ensure_fresh auto-refreshes the whole feed).
+        if should_warm_now():
             _console.print(
-                "[bold red]No live data available[/bold red] — "
-                "market data could not be fetched. Aborting."
+                f"Live mode: fetching real intraday data for "
+                f"{len(universe)} S&P 500 stocks "
+                f"[dim](first download takes a minute)…[/dim]"
             )
-            raise typer.Exit(code=1)
-        watchlist_cfg = WatchlistConfig(symbols=available)
-        _console.print(
-            f"[green]Live feed ready[/green] — "
-            f"{len(available)}/{len(universe)} symbols have data."
-        )
+            feed.refresh_now()
+            available = feed.available_symbols()
+            if not available:
+                _console.print(
+                    "[bold red]No live data available[/bold red] — "
+                    "market data could not be fetched. Aborting."
+                )
+                raise typer.Exit(code=1)
+            watchlist_cfg = WatchlistConfig(symbols=available)
+            _console.print(
+                f"[green]Live feed ready[/green] — "
+                f"{len(available)}/{len(universe)} symbols have data."
+            )
+        else:
+            # Market closed — skip the warm, start lean. The watchlist is
+            # the full universe; unavailable symbols get parked on the
+            # first real fetch at the pre-open warm-up cycle.
+            watchlist_cfg = WatchlistConfig(symbols=universe)
+            _console.print(
+                f"[cyan]{describe()}[/cyan]\n"
+                f"Starting lean — skipping the {len(universe)}-symbol warm-up "
+                f"(saves ~500 MB while sleeping). The full fetch runs ~30 min "
+                f"before the open."
+            )
     else:
         feed = LiveMockFeed()
         watchlist_cfg = load_watchlist_config()

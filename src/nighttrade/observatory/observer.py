@@ -1012,6 +1012,11 @@ class Observer:
                     _log.info("learning window complete — stopping observer")
                     self._learning_complete = True
                     break
+                # SPEED FIX (mirrors daytrade): cycle period is now ``interval``
+                # wall-clock seconds (was: ``interval`` extra sleep AFTER work,
+                # which made actual cycle = work_time + interval — silently
+                # overshooting the target cadence by exactly the work duration).
+                cycle_started = time.monotonic()
                 try:
                     self.run_once()
                     consecutive_failures = 0
@@ -1047,8 +1052,17 @@ class Observer:
                         extra_sleep,
                         consecutive_failures,
                     )
+                # Sleep what's left of the target cycle period after the work
+                # finished. If work exceeded interval, no sleep (and warn).
+                elapsed = time.monotonic() - cycle_started
+                total = max(0.0, interval + extra_sleep - elapsed)
+                if elapsed > interval and extra_sleep == 0:
+                    _log.warning(
+                        "cycle overshot interval: work=%.1fs interval=%ds — "
+                        "consider widening --interval or reducing universe",
+                        elapsed, interval,
+                    )
                 slept = 0.0
-                total = interval + extra_sleep
                 while slept < total and not self._stop:
                     time.sleep(min(1.0, total - slept))
                     slept += 1.0

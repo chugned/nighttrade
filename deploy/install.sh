@@ -87,7 +87,7 @@ make_plist() {
 # The observer runs under `caffeinate -s` so the Mac will not system-sleep
 # while the bot is alive (needed for round-the-clock tracking).
 make_plist com.nighttrade.observer \
-  /usr/bin/caffeinate -s "$PY" -m nighttrade observe --live --interval 300
+  /usr/bin/caffeinate -s "$PY" -m nighttrade observe --live --interval 180
 
 # Dashboard binds to 0.0.0.0 (always-bindable) and enforces tailnet-only
 # access at the application layer via TailnetOnlyMiddleware. Previously
